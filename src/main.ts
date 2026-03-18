@@ -5,6 +5,71 @@ import * as dat from 'dat.gui';
 import vertexShader from './shaders/ground.vert.glsl';
 import fragmentShader from './shaders/ground.frag.glsl';
 
+// --- Noise Logic (Matching Shader) ---
+function permute(x: THREE.Vector3): THREE.Vector3 {
+    return new THREE.Vector3(
+        ((x.x * 34.0) + 1.0) * x.x % 289.0,
+        ((x.y * 34.0) + 1.0) * x.y % 289.0,
+        ((x.z * 34.0) + 1.0) * x.z % 289.0
+    );
+}
+
+function snoise(v: THREE.Vector2): number {
+    const C = new THREE.Vector4(
+        (3.0 - Math.sqrt(3.0)) / 6.0,
+        0.5 * (Math.sqrt(3.0) - 1.0),
+        -1.0 + 2.0 * ((3.0 - Math.sqrt(3.0)) / 6.0),
+        1.0 / 41.0
+    );
+
+    let i = new THREE.Vector2(Math.floor(v.x + (v.x + v.y) * C.y), Math.floor(v.y + (v.x + v.y) * C.y));
+    let x0 = new THREE.Vector2(v.x - i.x + (i.x + i.y) * C.x, v.y - i.y + (i.x + i.y) * C.x);
+
+    let i1 = (x0.x > x0.y) ? new THREE.Vector2(1.0, 0.0) : new THREE.Vector2(0.0, 1.0);
+    let x12 = new THREE.Vector4(x0.x + C.x - i1.x, x0.y + C.x - i1.y, x0.x + C.z, x0.y + C.z);
+
+    let i_mod = new THREE.Vector2(i.x % 289.0, i.y % 289.0);
+    let p = permute(permute(new THREE.Vector3(i_mod.y, i_mod.y + i1.y, i_mod.y + 1.0))
+        .add(new THREE.Vector3(i_mod.x, i_mod.x + i1.x, i_mod.x + 1.0)));
+
+    let m = new THREE.Vector3(
+        Math.max(0.5 - (x0.x * x0.x + x0.y * x0.y), 0.0),
+        Math.max(0.5 - (x12.x * x12.x + x12.y * x12.y), 0.0),
+        Math.max(0.5 - (x12.z * x12.z + x12.w * x12.w), 0.0)
+    );
+    m.x = m.x * m.x * m.x * m.x;
+    m.y = m.y * m.y * m.y * m.y;
+    m.z = m.z * m.z * m.z * m.z;
+
+    let x = new THREE.Vector3(
+        2.0 * (p.x * C.w % 1.0) - 1.0,
+        2.0 * (p.y * C.w % 1.0) - 1.0,
+        2.0 * (p.z * C.w % 1.0) - 1.0
+    );
+    let h = new THREE.Vector3(Math.abs(x.x) - 0.5, Math.abs(x.y) - 0.5, Math.abs(x.z) - 0.5);
+    let ox = new THREE.Vector3(Math.floor(x.x + 0.5), Math.floor(x.y + 0.5), Math.floor(x.z + 0.5));
+    let a0 = new THREE.Vector3(x.x - ox.x, x.y - ox.y, x.z - ox.z);
+
+    m.x *= 1.79284291400159 - 0.85373472095314 * (a0.x * a0.x + h.x * h.x);
+    m.y *= 1.79284291400159 - 0.85373472095314 * (a0.y * a0.y + h.y * h.y);
+    m.z *= 1.79284291400159 - 0.85373472095314 * (a0.z * a0.z + h.z * h.z);
+
+    let g = new THREE.Vector3(
+        a0.x * x0.x + h.x * x0.y,
+        a0.y * x12.x + h.y * x12.y,
+        a0.z * x12.z + h.z * x12.w
+    );
+    return 130.0 * (m.x * g.x + m.y * g.y + m.z * g.z);
+}
+
+function getTerrainHeight(x: number, z: number): number {
+    const fNoiseMultiplier = 16.0;
+    const p = new THREE.Vector2(x, z);
+    const n1 = snoise(p.clone().multiplyScalar(state.noiseScale).add(new THREE.Vector2(state.noiseOffsetX, state.noiseOffsetZ)));
+    const n2 = snoise(new THREE.Vector2(n1, n1).multiplyScalar(state.noiseScale * fNoiseMultiplier).add(new THREE.Vector2(state.noiseOffsetX * fNoiseMultiplier, state.noiseOffsetZ * fNoiseMultiplier)));
+    return n2 * state.noiseHeight;
+}
+
 // --- Road Network Generator (Parish/Müller 2001) ---
 interface Segment {
     start: THREE.Vector2;
@@ -200,7 +265,7 @@ class RoadGenerator {
 
 // --- Scene ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87ceeb); // Sky blue background
+scene.background = new THREE.Color(0x050510); // Initial background
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -209,7 +274,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 document.body.appendChild(renderer.domElement);
 
 // Lights
-const ambientLight = new THREE.AmbientLight(0x404040, 1.0); // Soft white light
+const ambientLight = new THREE.AmbientLight(0x101015, 1.0);
 scene.add(ambientLight);
 
 const sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -227,29 +292,46 @@ const roadGenerator = new RoadGenerator();
 const state = {
     pattern: 'grid' as 'grid' | 'radial' | 'organic',
     roadWidth: 3.0,
+    footpathWidth: 1.2,
     dashLength: 0.8,
     dashWidth: 0.05,
     maxSegments: 250,
     highwayStep: 15.0,
     streetStep: 8.0,
-    branchProbability: 0.5,
+    branchProbability: 0.2,
     snapRadius: 2.0,
     noiseScale: 0.005,
     noiseHeight: 20.0,
     noiseOffsetX: 0.0,
     noiseOffsetZ: 0.0,
     grassColor: 0x33aa33,
-    groundSegments: 256,
-    sunIntensity: 1.0,
-    sunColor: 0xffffff,
+    roadColor: 0x333333,
+    footpathColor: 0x999999,
+    centerLineColor: 0xffff00,
+    laneLineColor: 0xffffff,
+    lampInterval: 12.0,
+    lampIntensity: 2.0,
+    lampRadius: 15.0,
+    lampColor: 0xffaa44,
+    lampOnTime: 18.5,
+    lampOffTime: 6.5,
+    groundSegments: 4,
+    timeOfDay: 12.0, // 0-24
     generate: () => updateRoads()
 };
 
 const gui = new dat.GUI();
-// ... (Roads folder remains)
 const roadFolder = gui.addFolder('Roads');
 roadFolder.add(state, 'pattern', ['grid', 'radial', 'organic']).onChange(() => updateRoads());
 roadFolder.add(state, 'roadWidth', 1.0, 10.0).onChange((v: number) => material.uniforms.roadWidth!.value = v);
+roadFolder.add(state, 'footpathWidth', 0.0, 5.0).onChange((v: number) => {
+    material.uniforms.footpathWidth!.value = v;
+    updateLamps();
+});
+roadFolder.addColor(state, 'roadColor').onChange(() => updateTimeOfDay());
+roadFolder.addColor(state, 'footpathColor').onChange(() => updateTimeOfDay());
+roadFolder.addColor(state, 'centerLineColor').onChange(() => updateTimeOfDay());
+roadFolder.addColor(state, 'laneLineColor').onChange(() => updateTimeOfDay());
 roadFolder.add(state, 'dashLength', 0.1, 5.0).onChange((v: number) => material.uniforms.dashLength!.value = v);
 roadFolder.add(state, 'dashWidth', 0.01, 0.5).onChange((v: number) => material.uniforms.dashWidth!.value = v);
 roadFolder.add(state, 'branchProbability', 0.0, 1.0).name('density').onChange(() => updateRoads());
@@ -260,45 +342,75 @@ roadFolder.add(state, 'snapRadius', 1.0, 10.0).onChange(() => updateRoads());
 roadFolder.add(state, 'generate');
 roadFolder.open();
 
+const lampFolder = gui.addFolder('Streetlamps');
+lampFolder.add(state, 'lampInterval', 5.0, 50.0).onChange((v: number) => {
+    material.uniforms.lampInterval!.value = v;
+    updateLamps();
+});
+lampFolder.add(state, 'lampIntensity', 0.0, 10.0).onChange(() => updateTimeOfDay());
+lampFolder.add(state, 'lampRadius', 5.0, 50.0).onChange((v: number) => material.uniforms.lampRadius!.value = v);
+lampFolder.addColor(state, 'lampColor').onChange((v: any) => {
+    material.uniforms.lampColor!.value.set(v);
+    updateLamps();
+});
+lampFolder.add(state, 'lampOnTime', 0, 24).name('On Time').onChange(() => updateTimeOfDay());
+lampFolder.add(state, 'lampOffTime', 0, 24).name('Off Time').onChange(() => updateTimeOfDay());
+lampFolder.open();
+
 const terrainFolder = gui.addFolder('Terrain');
-terrainFolder.add(state, 'noiseScale', 0.0001, 0.02).onChange((v: number) => material.uniforms.uNoiseScale!.value = v);
-terrainFolder.add(state, 'noiseHeight', 0.0, 100.0).onChange((v: number) => material.uniforms.uNoiseHeight!.value = v);
-terrainFolder.add(state, 'noiseOffsetX', -100.0, 100.0).onChange((v: number) => material.uniforms.uNoiseOffset!.value.x = v);
-terrainFolder.add(state, 'noiseOffsetZ', -100.0, 100.0).onChange((v: number) => material.uniforms.uNoiseOffset!.value.y = v);
-terrainFolder.addColor(state, 'grassColor').onChange((v: any) => material.uniforms.grassColor!.value.set(v));
+terrainFolder.add(state, 'noiseScale', 0.0001, 0.02).onChange((v: number) => {
+    material.uniforms.uNoiseScale!.value = v;
+    updateLamps();
+    updateTimeOfDay();
+});
+terrainFolder.add(state, 'noiseHeight', 0.0, 100.0).onChange((v: number) => {
+    material.uniforms.uNoiseHeight!.value = v;
+    updateLamps();
+    updateTimeOfDay();
+});
+terrainFolder.add(state, 'noiseOffsetX', -100.0, 100.0).onChange((v: number) => {
+    material.uniforms.uNoiseOffset!.value.x = v;
+    updateLamps();
+    updateTimeOfDay();
+});
+terrainFolder.add(state, 'noiseOffsetZ', -100.0, 100.0).onChange((v: number) => {
+    material.uniforms.uNoiseOffset!.value.y = v;
+    updateLamps();
+    updateTimeOfDay();
+});
+terrainFolder.addColor(state, 'grassColor').onChange(() => updateTimeOfDay());
 terrainFolder.add(state, 'groundSegments', 1, 512).step(1).name('segments').onChange(() => updateGroundGeometry());
 terrainFolder.open();
 
-const sunFolder = gui.addFolder('Sun');
-sunFolder.add(state, 'sunIntensity', 0.0, 2.0).onChange((v: number) => {
-    sunLight.intensity = v;
-    material.uniforms.uSunIntensity!.value = v;
-});
-sunFolder.addColor(state, 'sunColor').onChange((v: any) => {
-    sunLight.color.set(v);
-    material.uniforms.uSunColor!.value.set(v);
-});
-sunFolder.open();
+const environmentFolder = gui.addFolder('Environment');
+environmentFolder.add(state, 'timeOfDay', 0, 24).name('Time (0-24)').onChange(() => updateTimeOfDay());
+environmentFolder.open();
 
 // --- Material & Mesh ---
 const material = new THREE.ShaderMaterial({
     uniforms: {
-        grassColor: { value: new THREE.Color(0x33aa33) },
-        roadColor: { value: new THREE.Color(0x222222) },
-        centerLineColor: { value: new THREE.Color(0xffff00) },
-        laneLineColor: { value: new THREE.Color(0xffffff) },
+        grassColor: { value: new THREE.Color(state.grassColor) },
+        roadColor: { value: new THREE.Color(state.roadColor) },
+        footpathColor: { value: new THREE.Color(state.footpathColor) },
+        centerLineColor: { value: new THREE.Color(state.centerLineColor) },
+        laneLineColor: { value: new THREE.Color(state.laneLineColor) },
         roadWidth: { value: state.roadWidth },
+        footpathWidth: { value: state.footpathWidth },
         dashLength: { value: state.dashLength },
         dashWidth: { value: state.dashWidth },
         numSegments: { value: 0 },
         roadSegments: { value: new Array(256).fill(new THREE.Vector4(0, 0, 0, 0)) },
         roadTypes: { value: new Float32Array(256).fill(0) },
+        lampInterval: { value: state.lampInterval },
+        lampIntensity: { value: state.lampIntensity },
+        lampRadius: { value: state.lampRadius },
+        lampColor: { value: new THREE.Color(state.lampColor) },
         uNoiseScale: { value: state.noiseScale },
         uNoiseHeight: { value: state.noiseHeight },
         uNoiseOffset: { value: new THREE.Vector2(state.noiseOffsetX, state.noiseOffsetZ) },
-        uSunDirection: { value: sunLight.position.clone().normalize() },
-        uSunColor: { value: new THREE.Color(state.sunColor) },
-        uSunIntensity: { value: state.sunIntensity },
+        uSunDirection: { value: new THREE.Vector3(0, 1, 0) },
+        uSunColor: { value: new THREE.Color(0xffffff) },
+        uSunIntensity: { value: 1.0 },
         uAmbientColor: { value: new THREE.Color(0x404040) }
     },
     vertexShader,
@@ -309,6 +421,145 @@ const geometry = new THREE.PlaneGeometry(1000, 1000, state.groundSegments, state
 geometry.rotateX(-Math.PI / 2);
 const ground = new THREE.Mesh(geometry, material);
 scene.add(ground);
+
+// --- Lamp Meshes ---
+const lampGroup = new THREE.Group();
+scene.add(lampGroup);
+
+const lampMat = new THREE.MeshStandardMaterial({ 
+    color: 0x666666, 
+    side: THREE.DoubleSide,
+    roughness: 0.8,
+    metalness: 0.2
+});
+const lampPoleGeo = new THREE.PlaneGeometry(0.2, 3);
+const lampArmGeo = new THREE.PlaneGeometry(0.2, 0.9);
+
+function updateLamps() {
+    while(lampGroup.children.length > 0) {
+        lampGroup.remove(lampGroup.children[0]);
+    }
+
+    const segments = roadGenerator.segments;
+    const interval = state.lampInterval;
+    const halfRoadWidth = state.roadWidth * 0.5;
+    const totalWidth = halfRoadWidth + state.footpathWidth;
+
+    segments.forEach(s => {
+        if (s.type === 'highway') return;
+        const len = s.start.distanceTo(s.end);
+        const dir = s.end.clone().sub(s.start).normalize();
+        const normal = new THREE.Vector2(-dir.y, dir.x);
+        const angle = Math.atan2(dir.y, dir.x);
+
+        for (let d = 0; d <= len; d += interval) {
+            [-1, 1].forEach(side => {
+                const pos = s.start.clone().add(dir.clone().multiplyScalar(d)).add(normal.clone().multiplyScalar(side * totalWidth));
+                const height = getTerrainHeight(pos.x, pos.y);
+                
+                // Vertical Pole
+                const pole = new THREE.Mesh(lampPoleGeo, lampMat);
+                pole.position.set(pos.x, height + 1.5, pos.y);
+                pole.rotation.y = -angle; 
+                lampGroup.add(pole);
+
+                // Horizontal Arm (pointing towards road center)
+                const arm = new THREE.Mesh(lampArmGeo, lampMat);
+                const armDir = normal.clone().multiplyScalar(-side); 
+                arm.position.set(pos.x + armDir.x * 0.45, height + 3, pos.y + armDir.y * 0.45);
+                arm.rotation.x = Math.PI / 2;
+                arm.rotation.z = -angle + Math.PI / 2;
+                lampGroup.add(arm);
+            });
+        }
+    });
+}
+
+function updateTimeOfDay() {
+    const t = state.timeOfDay;
+    const sunAngle = ((t - 6) / 12) * Math.PI;
+    const isDay = t >= 6 && t <= 18;
+    
+    const sunPos = new THREE.Vector3(
+        Math.cos(sunAngle) * 200,
+        Math.sin(sunAngle) * 200,
+        50
+    );
+    sunLight.position.copy(sunPos);
+    material.uniforms.uSunDirection!.value.copy(sunPos).normalize();
+
+    let sunIntensity = 0;
+    let ambientIntensity = 0.1;
+    
+    if (isDay) {
+        sunIntensity = Math.pow(Math.sin(sunAngle), 0.5); 
+        ambientIntensity = 0.2 + 0.5 * sunIntensity;
+    } else {
+        sunIntensity = 0;
+        ambientIntensity = 0.1;
+    }
+
+    // Lamp Logic
+    let lampPower = 0;
+    const fadeWindow = 0.5;
+    const isNight = state.lampOnTime > state.lampOffTime 
+        ? (t >= state.lampOnTime || t <= state.lampOffTime)
+        : (t >= state.lampOnTime && t <= state.lampOffTime);
+
+    if (isNight) {
+        lampPower = state.lampIntensity;
+        if (state.lampOnTime > state.lampOffTime) {
+            if (t >= state.lampOnTime && t < state.lampOnTime + fadeWindow) {
+                lampPower = THREE.MathUtils.smoothstep(t, state.lampOnTime, state.lampOnTime + fadeWindow) * state.lampIntensity;
+            } else if (t > state.lampOffTime - fadeWindow && t <= state.lampOffTime) {
+                lampPower = (1.0 - THREE.MathUtils.smoothstep(t, state.lampOffTime - fadeWindow, state.lampOffTime)) * state.lampIntensity;
+            }
+        }
+    }
+
+    const dayColor = new THREE.Color(0xffffff);
+    const dawnColor = new THREE.Color(0xffaa44);
+    
+    let currentSunColor = new THREE.Color();
+    if (isDay) {
+        const dawnWeight = 1.0 - Math.sin(sunAngle);
+        currentSunColor.lerpColors(dayColor, dawnColor, dawnWeight);
+    } else {
+        currentSunColor.set(0x050510);
+    }
+
+    material.uniforms.uSunIntensity!.value = sunIntensity;
+    material.uniforms.uSunColor!.value.copy(currentSunColor);
+    material.uniforms.uAmbientColor!.value.setRGB(ambientIntensity, ambientIntensity, ambientIntensity * 1.1);
+    material.uniforms.lampIntensity!.value = lampPower;
+
+    // Darken colors slightly at night
+    const colorLerpFactor = isDay ? THREE.MathUtils.smoothstep(Math.sin(sunAngle), 0.0, 0.2) : 0;
+    const nightDarkness = 0.3;
+
+    const baseGrass = new THREE.Color(state.grassColor);
+    material.uniforms.grassColor!.value.lerpColors(baseGrass.clone().multiplyScalar(nightDarkness), baseGrass, colorLerpFactor);
+
+    const baseRoad = new THREE.Color(state.roadColor);
+    material.uniforms.roadColor!.value.lerpColors(baseRoad.clone().multiplyScalar(nightDarkness), baseRoad, colorLerpFactor);
+
+    const baseFootpath = new THREE.Color(state.footpathColor);
+    material.uniforms.footpathColor!.value.lerpColors(baseFootpath.clone().multiplyScalar(nightDarkness), baseFootpath, colorLerpFactor);
+
+    const baseCenter = new THREE.Color(state.centerLineColor);
+    material.uniforms.centerLineColor!.value.lerpColors(baseCenter.clone().multiplyScalar(nightDarkness), baseCenter, colorLerpFactor);
+
+    const baseLane = new THREE.Color(state.laneLineColor);
+    material.uniforms.laneLineColor!.value.lerpColors(baseLane.clone().multiplyScalar(nightDarkness), baseLane, colorLerpFactor);
+
+    const skyColor = new THREE.Color();
+    if (isDay) {
+        skyColor.lerpColors(new THREE.Color(0x87ceeb), new THREE.Color(0x0a0a20), 1.0 - Math.sin(sunAngle));
+    } else {
+        skyColor.set(0x050510);
+    }
+    scene.background = skyColor;
+}
 
 function updateGroundGeometry() {
     ground.geometry.dispose();
@@ -336,10 +587,13 @@ function updateRoads() {
     material.uniforms.numSegments!.value = Math.min(segments.length, 256);
     material.uniforms.roadSegments!.value = shaderSegments;
     material.uniforms.roadTypes!.value = new Float32Array(shaderTypes);
+    
+    updateLamps();
 }
 
 // Initial Generation
 updateRoads();
+updateTimeOfDay();
 
 // Animation
 function animate() {

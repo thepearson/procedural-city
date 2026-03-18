@@ -1,13 +1,20 @@
 uniform vec3 grassColor;
 uniform vec3 roadColor;
+uniform vec3 footpathColor;
 uniform vec3 centerLineColor;
 uniform vec3 laneLineColor;
 uniform float roadWidth;
+uniform float footpathWidth;
 uniform float dashLength;
 uniform float dashWidth;
 uniform float numSegments;
 uniform vec4 roadSegments[256]; // x1, z1, x2, z2
 uniform float roadTypes[256];    // 0 = street, 1 = highway
+
+uniform float lampInterval;
+uniform float lampIntensity;
+uniform vec3 lampColor;
+uniform float lampRadius;
 
 uniform vec3 uSunDirection;
 uniform vec3 uSunColor;
@@ -39,6 +46,7 @@ void main() {
     vec2 p = vPosition.xz;
     
     // Calculate normal using derivatives for shading
+    // Using dFdx cross dFdy for correct upward normal in Three.js default screen/world orientation
     vec3 normal = normalize(cross(dFdx(vPosition), dFdy(vPosition)));
     
     // Base grass color with simple noise
@@ -50,6 +58,9 @@ void main() {
     float bestU = 0.0;
     float bestType = 0.0;
     bool onRoad = false;
+    bool onFootpath = false;
+    
+    float totalLampLight = 0.0;
     
     for (int i = 0; i < 256; i++) {
         if (float(i) >= numSegments) break;
@@ -58,55 +69,98 @@ void main() {
         float dist = distanceToSegment(p, roadSegments[i].xy, roadSegments[i].zw, b, u);
         
         float currentType = roadTypes[i];
-        float currentWidth = roadWidth * (currentType > 0.5 ? 1.5 : 1.0);
+        float currentRoadWidth = roadWidth * (currentType > 0.5 ? 1.5 : 1.0);
+        float halfRoadWidth = currentRoadWidth * 0.5;
+        float currentFootpathWidth = currentType < 0.5 ? footpathWidth : 0.0;
+        float halfTotalWidth = halfRoadWidth + currentFootpathWidth;
         
-        if (dist < currentWidth * 0.5) {
-            onRoad = true;
+        // Lamp lighting (only for streets, placed at interval)
+        if (currentType < 0.5 && lampInterval > 0.0) {
+            vec2 a = roadSegments[i].xy;
+            vec2 b_pos = roadSegments[i].zw;
+            vec2 vDir = b_pos - a;
+            float L = length(vDir);
+            if (L > 0.1) {
+                vec2 vNorm = vDir / L;
+                vec2 nNorm = vec2(-vNorm.y, vNorm.x);
+                
+                // Project point onto segment axis to find nearest lamp index
+                float bProj = dot(p - a, vNorm);
+                float lampIndex = clamp(floor(bProj / lampInterval + 0.5), 0.0, floor(L / lampInterval));
+                
+                // Check both sides of the road for the nearest lamp point
+                for (float side = -1.0; side <= 1.0; side += 2.0) {
+                    vec2 pLamp = a + (lampIndex * lampInterval) * vNorm + (side * halfTotalWidth) * nNorm;
+                    
+                    // Simple Euclidean distance to the lamp on the ground plane
+                    float dLamp = distance(p, pLamp);
+                    
+                    // Smooth circular falloff
+                    float falloff = clamp(1.0 - dLamp / lampRadius, 0.0, 1.0);
+                    falloff = smoothstep(0.0, 1.0, falloff);
+                    totalLampLight += falloff * lampIntensity;
+                }
+            }
+        }
+
+        if (dist < halfTotalWidth) {
             if (dist < minDist) {
                 minDist = dist;
                 bestB = b;
                 bestU = u;
                 bestType = currentType;
+                
+                if (dist < halfRoadWidth) {
+                    onRoad = true;
+                    onFootpath = false;
+                } else {
+                    onRoad = false;
+                    onFootpath = true;
+                }
             }
         }
     }
     
     if (onRoad) {
         baseColor = roadColor;
-        
         float absU = abs(bestU);
-        float currentWidth = roadWidth * (bestType > 0.5 ? 1.5 : 1.0);
-        float normU = absU / (currentWidth * 0.5); // 0 at center, 1 at edge
+        float currentRoadWidth = roadWidth * (bestType > 0.5 ? 1.5 : 1.0);
+        float normU = absU / (currentRoadWidth * 0.5);
         
-        // Center line (yellow)
         float centerLineWidth = 0.1;
         if (absU < centerLineWidth * 0.5) {
             baseColor = centerLineColor;
         }
         
-        // Dash line width logic
         float laneLineWidth = dashWidth;
-        
         if (bestType > 0.5) {
-            // HIGHWAY: 4 lanes (center + 2 dividers)
-            float laneBoundary = 0.5; // Halfway to edge
-            if (abs(normU - laneBoundary) < laneLineWidth / (currentWidth * 0.5)) {
-                // Dashed line logic
+            float laneBoundary = 0.5;
+            if (abs(normU - laneBoundary) < laneLineWidth / (currentRoadWidth * 0.5)) {
                 if (fract(bestB / dashLength) > 0.5) {
                     baseColor = laneLineColor;
                 }
             }
         }
         
-        // Edge lines (white solid)
         if (normU > 0.95) {
             baseColor = laneLineColor;
         }
+    } else if (onFootpath) {
+        baseColor = footpathColor;
+        float tileSize = 1.0;
+        float tilePattern = step(0.05, fract(bestB / tileSize)) * step(0.05, fract(abs(bestU) / tileSize));
+        baseColor *= (0.9 + 0.1 * tilePattern);
     }
     
     // Lighting calculation
     float diffuse = max(dot(normal, uSunDirection), 0.0);
-    vec3 lightEffect = uAmbientColor + uSunColor * diffuse * uSunIntensity;
+
+    // Standard sun/ambient lighting - scaled by sun intensity as requested
+    vec3 dayLighting = (uAmbientColor + uSunColor * diffuse) * uSunIntensity;
     
-    gl_FragColor = vec4(baseColor * lightEffect, 1.0);
+    // Streetlamp additive lighting contribution
+    vec3 lampLighting = lampColor * totalLampLight;
+    
+    // Final color combines both lighting systems additively
+    gl_FragColor = vec4(baseColor * (dayLighting + lampLighting), 1.0);
 }
