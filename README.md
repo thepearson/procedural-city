@@ -61,4 +61,4 @@ A real-time, procedurally generated 3D city road network built with Three.js, Vi
 
 ## 📄 License
 
-This project is licensed under the ISC License.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

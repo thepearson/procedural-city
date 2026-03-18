@@ -436,9 +436,7 @@ const lampPoleGeo = new THREE.PlaneGeometry(0.2, 3);
 const lampArmGeo = new THREE.PlaneGeometry(0.2, 0.9);
 
 function updateLamps() {
-    while(lampGroup.children.length > 0) {
-        lampGroup.remove(lampGroup.children[0]);
-    }
+    lampGroup.clear();
 
     const segments = roadGenerator.segments;
     const interval = state.lampInterval;
