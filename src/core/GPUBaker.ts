@@ -16,8 +16,8 @@ export class GPUBaker {
         this.renderTarget = new THREE.WebGLRenderTarget(BAKE_SIZE, BAKE_SIZE, {
             format: THREE.RGBAFormat,
             type: THREE.FloatType,
-            minFilter: THREE.LinearFilter,
-            magFilter: THREE.LinearFilter
+            minFilter: THREE.NearestFilter,
+            magFilter: THREE.NearestFilter
         });
 
         this.scene = new THREE.Scene();

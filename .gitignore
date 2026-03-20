@@ -5,11 +5,11 @@ dist-ssr/
 *.local
 
 # Generated files
-src/*.js
-src/*.js.map
-src/*.d.ts
+src/**/*.js
+src/**/*.js.map
+src/**/*.d.ts
 !src/shaders.d.ts
-src/*.d.ts.map
+src/**/*.d.ts.map
 vite.config.js
 vite.config.js.map
 vite.config.d.ts
