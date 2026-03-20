@@ -110,14 +110,17 @@ function updateLamps() {
     let lampCount = 0;
     const segments = roadGenerator.segments;
     const interval = state.lampInterval;
-    const halfRoadWidth = state.roadWidth * 0.5;
-    const totalWidth = halfRoadWidth + state.footpathWidth;
 
     segments.forEach((s: Segment) => {
         const len = s.start.distanceTo(s.end);
         const dir = s.end.clone().sub(s.start).normalize();
         const normal = new THREE.Vector2(-dir.y, dir.x);
         const angle = Math.atan2(dir.y, dir.x);
+
+        const currentRoadWidth = state.roadWidth * (s.type === 'highway' ? 1.5 : 1.0);
+        const halfRoadWidth = currentRoadWidth * 0.5;
+        const currentFootpathWidth = (s.type === 'street') ? state.footpathWidth : 0.0;
+        const totalWidth = halfRoadWidth + currentFootpathWidth;
 
         for (let d = 0; d <= len; d += interval) {
             [-1, 1].forEach(side => {

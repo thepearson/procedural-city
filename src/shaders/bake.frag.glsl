@@ -36,31 +36,36 @@ void main() {
     for (int i = 0; i < 256; i++) {
         if (float(i) >= numSegments) break;
         
+        vec2 a = roadSegments[i].xy;
+        vec2 b_pos = roadSegments[i].zw;
         float b, u;
-        float dist = distanceToSegment(p, roadSegments[i].xy, roadSegments[i].zw, b, u);
+        float dist = distanceToSegment(p, a, b_pos, b, u);
         
-        // 1. Update Nearest Index and SDF Distance
+        // 1. Find Nearest Index for SDF optimization
         if (dist < minDist) {
             minDist = dist;
             nearestIndex = float(i);
         }
 
-        // 2. Calculate Lamp Lighting for this segment
-        float currentType = roadTypes[i];
-        if (currentType < 0.5 && lampInterval > 0.0) {
-            float currentRoadWidth = roadWidth;
+        // 2. Accumulate Lighting from ALL segments (independent of nearest)
+        if (lampInterval > 0.0) {
+            float currentType = roadTypes[i];
+            float currentRoadWidth = roadWidth * (currentType > 0.5 ? 1.5 : 1.0);
             float halfRoadWidth = currentRoadWidth * 0.5;
-            float halfTotalWidth = halfRoadWidth + footpathWidth;
+            float currentFootpathWidth = (currentType < 0.5) ? footpathWidth : 0.0;
+            float halfTotalWidth = halfRoadWidth + currentFootpathWidth;
             
-            vec2 a = roadSegments[i].xy;
-            vec2 b_pos = roadSegments[i].zw;
             vec2 vDir = b_pos - a;
             float L = length(vDir);
             if (L > 0.1) {
                 vec2 vNorm = vDir / L;
                 vec2 nNorm = vec2(-vNorm.y, vNorm.x);
                 float bProj = dot(p - a, vNorm);
-                float lampIndexClamp = clamp(floor(bProj / lampInterval + 0.5), 0.0, floor(L / lampInterval));
+                
+                // Find number of lamps on this segment
+                float numLamps = floor(L / lampInterval);
+                // Closest lamp index on this segment
+                float lampIndexClamp = clamp(floor(bProj / lampInterval + 0.5), 0.0, numLamps);
                 
                 for (float side = -1.0; side <= 1.0; side += 2.0) {
                     vec2 pLamp = a + (lampIndexClamp * lampInterval) * vNorm + (side * halfTotalWidth) * nNorm;
