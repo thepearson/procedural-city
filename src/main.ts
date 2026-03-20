@@ -1,9 +1,16 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import * as dat from 'dat.gui';
+import Stats from 'stats.js';
 
 import vertexShader from './shaders/ground.vert.glsl';
 import fragmentShader from './shaders/ground.frag.glsl';
+
+// --- Performance Monitor ---
+const stats = new Stats();
+stats.showPanel(0); // 0: fps, 1: ms, 2: mb, 3+: custom
+stats.dom.style.display = 'none';
+document.body.appendChild(stats.dom);
 
 // --- Noise Logic (Matching Shader) ---
 function permute(x: THREE.Vector3): THREE.Vector3 {
@@ -317,6 +324,7 @@ const state = {
     lampOffTime: 6.5,
     groundSegments: 4,
     timeOfDay: 12.0, // 0-24
+    showStats: false,
     generate: () => updateRoads()
 };
 
@@ -384,6 +392,9 @@ terrainFolder.open();
 
 const environmentFolder = gui.addFolder('Environment');
 environmentFolder.add(state, 'timeOfDay', 0, 24).name('Time (0-24)').onChange(() => updateTimeOfDay());
+environmentFolder.add(state, 'showStats').name('Show Stats').onChange((v: boolean) => {
+    stats.dom.style.display = v ? 'block' : 'none';
+});
 environmentFolder.open();
 
 // --- Material & Mesh ---
@@ -595,9 +606,11 @@ updateTimeOfDay();
 
 // Animation
 function animate() {
+    stats.begin();
     requestAnimationFrame(animate);
     controls.update();
     renderer.render(scene, camera);
+    stats.end();
 }
 animate();
 
