@@ -461,7 +461,6 @@ function updateOptimizationTextures(segments: Segment[]) {
     const radiusSq = state.lampRadius * state.lampRadius;
 
     segments.forEach(s => {
-        if (s.type === 'highway') return;
         const len = s.start.distanceTo(s.end);
         const dir = s.end.clone().sub(s.start).normalize();
         const normal = new THREE.Vector2(-dir.y, dir.x);
@@ -537,9 +536,8 @@ const ground = new THREE.Mesh(geometry, material);
 scene.add(ground);
 
 // --- Lamp Meshes ---
-const lampGroup = new THREE.Group();
-scene.add(lampGroup);
-
+// --- Lamp Meshes ---
+const MAX_LAMPS = 2048;
 const lampMat = new THREE.MeshStandardMaterial({ 
     color: 0x666666, 
     side: THREE.DoubleSide,
@@ -549,8 +547,17 @@ const lampMat = new THREE.MeshStandardMaterial({
 const lampPoleGeo = new THREE.PlaneGeometry(0.2, 3);
 const lampArmGeo = new THREE.PlaneGeometry(0.2, 0.9);
 
+const poleInstances = new THREE.InstancedMesh(lampPoleGeo, lampMat, MAX_LAMPS);
+const armInstances = new THREE.InstancedMesh(lampArmGeo, lampMat, MAX_LAMPS);
+poleInstances.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+armInstances.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+scene.add(poleInstances);
+scene.add(armInstances);
+
+const dummy = new THREE.Object3D();
+
 function updateLamps() {
-    lampGroup.clear();
+    let lampCount = 0;
 
     const segments = roadGenerator.segments;
     const interval = state.lampInterval;
@@ -558,7 +565,6 @@ function updateLamps() {
     const totalWidth = halfRoadWidth + state.footpathWidth;
 
     segments.forEach(s => {
-        if (s.type === 'highway') return;
         const len = s.start.distanceTo(s.end);
         const dir = s.end.clone().sub(s.start).normalize();
         const normal = new THREE.Vector2(-dir.y, dir.x);
@@ -566,25 +572,48 @@ function updateLamps() {
 
         for (let d = 0; d <= len; d += interval) {
             [-1, 1].forEach(side => {
+                if (lampCount >= MAX_LAMPS) return;
+
                 const pos = s.start.clone().add(dir.clone().multiplyScalar(d)).add(normal.clone().multiplyScalar(side * totalWidth));
+                
+                // Intersection Check: Don't place lamps on other roads
+                let onOtherRoad = false;
+                for (const other of segments) {
+                    if (other === s) continue;
+                    const otherWidth = state.roadWidth * (other.type === 'highway' ? 1.5 : 1.0);
+                    const safeDistSq = (otherWidth * 0.5 + 0.5) * (otherWidth * 0.5 + 0.5);
+                    if (distanceToSegmentSq(pos.x, pos.y, other.start.x, other.start.y, other.end.x, other.end.y) < safeDistSq) {
+                        onOtherRoad = true;
+                        break;
+                    }
+                }
+                if (onOtherRoad) return;
+
                 const height = getTerrainHeight(pos.x, pos.y);
                 
                 // Vertical Pole
-                const pole = new THREE.Mesh(lampPoleGeo, lampMat);
-                pole.position.set(pos.x, height + 1.5, pos.y);
-                pole.rotation.y = -angle; 
-                lampGroup.add(pole);
+                dummy.position.set(pos.x, height + 1.5, pos.y);
+                dummy.rotation.set(0, -angle, 0);
+                dummy.scale.set(1, 1, 1);
+                dummy.updateMatrix();
+                poleInstances.setMatrixAt(lampCount, dummy.matrix);
 
-                // Horizontal Arm (pointing towards road center)
-                const arm = new THREE.Mesh(lampArmGeo, lampMat);
+                // Horizontal Arm
                 const armDir = normal.clone().multiplyScalar(-side); 
-                arm.position.set(pos.x + armDir.x * 0.45, height + 3, pos.y + armDir.y * 0.45);
-                arm.rotation.x = Math.PI / 2;
-                arm.rotation.z = -angle + Math.PI / 2;
-                lampGroup.add(arm);
+                dummy.position.set(pos.x + armDir.x * 0.45, height + 3, pos.y + armDir.y * 0.45);
+                dummy.rotation.set(Math.PI / 2, 0, -angle + Math.PI);
+                dummy.updateMatrix();
+                armInstances.setMatrixAt(lampCount, dummy.matrix);
+
+                lampCount++;
             });
         }
     });
+
+    poleInstances.count = lampCount;
+    armInstances.count = lampCount;
+    poleInstances.instanceMatrix.needsUpdate = true;
+    armInstances.instanceMatrix.needsUpdate = true;
 }
 
 function updateTimeOfDay() {
