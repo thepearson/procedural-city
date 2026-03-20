@@ -13,7 +13,7 @@ export const state = {
     noiseHeight: 20.0,
     noiseOffsetX: 0.0,
     noiseOffsetZ: 0.0,
-    grassColor: 0x228822, // Updated base grass color
+    grassColor: 0x4f754f, // Updated base grass color
     roadColor: 0x333333,
     footpathColor: 0x999999,
     centerLineColor: 0xffff00,
