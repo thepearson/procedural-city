@@ -71,7 +71,7 @@ void main() {
     // Shading
     vec3 normal = normalize(cross(dFdx(vPosition), dFdy(vPosition)));
     float noise = fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
-    vec3 baseColor = grassColor * (0.8 + 0.2 * noise);
+    vec3 baseColor = grassColor;
     
     float bestB = 0.0;
     float bestU = 0.0;

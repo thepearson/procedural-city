@@ -297,7 +297,7 @@ const state = {
     roadWidth: 3.0, footpathWidth: 1.2, dashLength: 0.8, dashWidth: 0.05,
     maxSegments: 250, highwayStep: 15.0, streetStep: 8.0, branchProbability: 0.2, snapRadius: 2.0,
     noiseScale: 0.005, noiseHeight: 20.0, noiseOffsetX: 0.0, noiseOffsetZ: 0.0,
-    grassColor: 0x33aa33, roadColor: 0x333333, footpathColor: 0x999999, centerLineColor: 0xffff00, laneLineColor: 0xffffff,
+    grassColor: 0x547a54, roadColor: 0x333333, footpathColor: 0x999999, centerLineColor: 0xffff00, laneLineColor: 0xffffff,
     lampInterval: 12.0, lampIntensity: 2.0, lampRadius: 15.0, lampColor: 0xffaa44, lampOnTime: 18.5, lampOffTime: 6.5,
     groundSegments: 64, timeOfDay: 12.0, showStats: false, debugMode: 0,
     generate: () => updateRoads()
