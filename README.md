@@ -2,7 +2,7 @@
 
 A real-time, procedurally generated 3D city road network built with Three.js, Vite, and custom GLSL shaders. This project simulates a self-organizing road network with dynamic environments, including a full day/night cycle and atmospheric street lighting.
 
-![Procedural City Preview](https://via.placeholder.com/800x450.png?text=Procedural+City+Generator+Preview)
+![Procedural City Preview](https://city.craigpearson.co.nz)
 
 ## 🚀 Features
 
@@ -33,8 +33,8 @@ A real-time, procedurally generated 3D city road network built with Three.js, Vi
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/your-username/threejs-city2.git
-   cd threejs-city2
+   git clone git@github.com:thepearson/threejs-city.git
+   cd threejs-city
    ```
 
 2. **Install dependencies**:

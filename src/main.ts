@@ -322,7 +322,7 @@ const state = {
     lampColor: 0xffaa44,
     lampOnTime: 18.5,
     lampOffTime: 6.5,
-    groundSegments: 4,
+    groundSegments: 64,
     timeOfDay: 12.0, // 0-24
     showStats: false,
     generate: () => updateRoads()
