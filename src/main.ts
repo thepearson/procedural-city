@@ -101,12 +101,16 @@ class RoadGenerator {
         this.segments = [];
         this.queue = [];
         
-        this.queue.push({
-            start: new THREE.Vector2(-15, 0),
-            end: new THREE.Vector2(0, 0),
-            angle: 0,
-            type: 'highway',
-            status: 'active'
+        // Initial highway segments to start from center in 4 directions
+        const directions = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
+        directions.forEach(angle => {
+            this.queue.push({
+                start: new THREE.Vector2(0, 0),
+                end: new THREE.Vector2(Math.cos(angle) * this.highwayStepSize, Math.sin(angle) * this.highwayStepSize),
+                angle: angle,
+                type: 'highway',
+                status: 'active'
+            });
         });
 
         while (this.queue.length > 0 && this.segments.length < this.maxSegments) {
@@ -126,6 +130,18 @@ class RoadGenerator {
     applyLocalConstraints(s: Segment) {
         let closestIntersection: THREE.Vector2 | null = null;
         let minT = 1.1;
+
+        // Boundary check: Clip to terrain bounds
+        const limit = TERRAIN_SIZE * 0.5;
+        if (Math.abs(s.end.x) > limit || Math.abs(s.end.y) > limit) {
+            const tX = s.end.x > limit ? (limit - s.start.x) / (s.end.x - s.start.x) : (s.end.x < -limit ? (-limit - s.start.x) / (s.end.x - s.start.x) : 1.0);
+            const tY = s.end.y > limit ? (limit - s.start.y) / (s.end.y - s.start.y) : (s.end.y < -limit ? (-limit - s.start.y) / (s.end.y - s.start.y) : 1.0);
+            const t = Math.min(tX, tY);
+            if (t < 1.0) {
+                s.end.set(s.start.x + (s.end.x - s.start.x) * t, s.start.y + (s.end.y - s.start.y) * t);
+                s.status = 'end';
+            }
+        }
 
         for (const existing of this.segments) {
             const intersect = this.lineIntersect(s.start, s.end, existing.start, existing.end);
