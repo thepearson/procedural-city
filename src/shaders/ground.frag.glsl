@@ -20,9 +20,8 @@ uniform vec3 uSunColor;
 uniform float uSunIntensity;
 uniform vec3 uAmbientColor;
 
-// Optimization Textures
-uniform sampler2D uIndexMap; // R: nearest index, G: distance
-uniform sampler2D uLampLightMap; // R: total lamp intensity
+// Optimization Texture
+uniform sampler2D uBakeMap; // R: nearest index, G: distance, B: total lamp intensity
 uniform float uTerrainSize;
 uniform int uDebugMode;
 
@@ -50,12 +49,10 @@ void main() {
     vec2 terrainUV = p / uTerrainSize + 0.5;
     
     // Fetch pre-baked optimization data
-    vec4 lookup = texture2D(uIndexMap, terrainUV);
+    vec4 lookup = texture2D(uBakeMap, terrainUV);
     float nearestIndexFloat = lookup.r;
     float sdfDist = lookup.g;
-    
-    // Sample the high-res additive light map for smooth streetlights
-    float bakedLampLight = texture2D(uLampLightMap, terrainUV).r;
+    float bakedLampLight = lookup.b;
 
     // Debug Visualizations
     if (uDebugMode == 1) {

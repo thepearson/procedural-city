@@ -5,10 +5,12 @@ import Stats from 'stats.js';
 
 import vertexShader from './shaders/ground.vert.glsl';
 import fragmentShader from './shaders/ground.frag.glsl';
+import bakeVertexShader from './shaders/bake.vert.glsl';
+import bakeFragmentShader from './shaders/bake.frag.glsl';
 
 // --- Performance Monitor ---
 const stats = new Stats();
-stats.showPanel(0); // 0: fps, 1: ms, 2: mb, 3+: custom
+stats.showPanel(0); 
 stats.dom.style.display = 'none';
 document.body.appendChild(stats.dom);
 
@@ -99,9 +101,8 @@ class RoadGenerator {
         this.segments = [];
         this.queue = [];
         
-        // Initial highway segments to start from center
         this.queue.push({
-            start: new THREE.Vector2(-this.highwayStepSize, 0),
+            start: new THREE.Vector2(-15, 0),
             end: new THREE.Vector2(0, 0),
             angle: 0,
             type: 'highway',
@@ -178,34 +179,26 @@ class RoadGenerator {
         const stepSize = s.type === 'highway' ? this.highwayStepSize : this.streetStepSize;
 
         if (pattern === 'grid') {
-            // Grid pattern: Aligned to global axes
             const globalAngles = [0, Math.PI / 2, -Math.PI / 2, Math.PI];
             for (const angle of globalAngles) {
-                // Check if this angle is roughly in the direction of growth (don't go backwards)
                 const diff = Math.abs(this.normalizeAngle(angle - baseAngle));
-                if (diff < 0.1) { // Forward
+                if (diff < 0.1) {
                     choices.push({ angle, type: s.type });
-                } else if (diff > Math.PI / 2 - 0.1 && diff < Math.PI / 2 + 0.1) { // Perpendicular
+                } else if (diff > Math.PI / 2 - 0.1 && diff < Math.PI / 2 + 0.1) {
                     if (Math.random() < this.branchProbability) {
                         choices.push({ angle, type: 'street' });
                     }
                 }
             }
         } else if (pattern === 'radial') {
-            // Radial pattern: Towards/away from center or tangential
             const center = new THREE.Vector2(0, 0);
             const angleToCenter = Math.atan2(s.end.y - center.y, s.end.x - center.x);
-            
-            // 1. Radial (outward)
             choices.push({ angle: angleToCenter, type: s.type });
-            
-            // 2. Tangential (circular)
             if (Math.random() < this.branchProbability) {
                 choices.push({ angle: angleToCenter + Math.PI / 2, type: 'street' });
                 choices.push({ angle: angleToCenter - Math.PI / 2, type: 'street' });
             }
         } else {
-            // Organic: Random walks with branching
             choices.push({ angle: baseAngle + THREE.MathUtils.randFloat(-0.2, 0.2), type: s.type });
             if (Math.random() < this.branchProbability) {
                 choices.push({ angle: baseAngle + Math.PI / 2 + THREE.MathUtils.randFloat(-0.3, 0.3), type: 'street' });
@@ -241,17 +234,11 @@ class RoadGenerator {
     }
 
     lineIntersect(p0: THREE.Vector2, p1: THREE.Vector2, p2: THREE.Vector2, p3: THREE.Vector2): THREE.Vector2 | null {
-        const s1_x = p1.x - p0.x;
-        const s1_y = p1.y - p0.y;
-        const s2_x = p3.x - p2.x;
-        const s2_y = p3.y - p2.y;
-
+        const s1_x = p1.x - p0.x, s1_y = p1.y - p0.y, s2_x = p3.x - p2.x, s2_y = p3.y - p2.y;
         const det = (-s2_x * s1_y + s1_x * s2_y);
         if (Math.abs(det) < 0.0001) return null;
-
         const s = (-s1_y * (p0.x - p2.x) + s1_x * (p0.y - p2.y)) / det;
         const t = ( s2_x * (p0.y - p2.y) - s2_y * (p0.x - p2.x)) / det;
-
         if (s >= 0 && s <= 1 && t >= 0 && t <= 1) {
             return new THREE.Vector2(p0.x + (t * s1_x), p0.y + (t * s1_y));
         }
@@ -259,31 +246,25 @@ class RoadGenerator {
     }
 
     closestPointOnSegment(p: THREE.Vector2, a: THREE.Vector2, b: THREE.Vector2): THREE.Vector2 {
-        const v = b.clone().sub(a);
-        const w = p.clone().sub(a);
-        const c1 = w.dot(v);
-        const c2 = v.dot(v);
+        const v = b.clone().sub(a), w = p.clone().sub(a);
+        const c1 = w.dot(v), c2 = v.dot(v);
         if (c1 <= 0) return a.clone();
         if (c2 <= c1) return b.clone();
-        const b_norm = c1 / c2;
-        return a.clone().add(v.multiplyScalar(b_norm));
+        return a.clone().add(v.multiplyScalar(c1 / c2));
     }
 }
 
 // --- Scene ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x050510); // Initial background
-
+scene.background = new THREE.Color(0x050510);
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 document.body.appendChild(renderer.domElement);
 
-// Lights
 const ambientLight = new THREE.AmbientLight(0x101015, 1.0);
 scene.add(ambientLight);
-
 const sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
 sunLight.position.set(100, 200, 100);
 scene.add(sunLight);
@@ -292,51 +273,120 @@ const controls = new OrbitControls(camera, renderer.domElement);
 camera.position.set(0, 150, 150);
 controls.update();
 
-// --- Generator Instance ---
 const roadGenerator = new RoadGenerator();
 
 // --- State and GUI ---
 const state = {
     pattern: 'grid' as 'grid' | 'radial' | 'organic',
-    roadWidth: 3.0,
-    footpathWidth: 1.2,
-    dashLength: 0.8,
-    dashWidth: 0.05,
-    maxSegments: 250,
-    highwayStep: 15.0,
-    streetStep: 8.0,
-    branchProbability: 0.2,
-    snapRadius: 2.0,
-    noiseScale: 0.005,
-    noiseHeight: 20.0,
-    noiseOffsetX: 0.0,
-    noiseOffsetZ: 0.0,
-    grassColor: 0x33aa33,
-    roadColor: 0x333333,
-    footpathColor: 0x999999,
-    centerLineColor: 0xffff00,
-    laneLineColor: 0xffffff,
-    lampInterval: 12.0,
-    lampIntensity: 2.0,
-    lampRadius: 15.0,
-    lampColor: 0xffaa44,
-    lampOnTime: 18.5,
-    lampOffTime: 6.5,
-    groundSegments: 64,
-    timeOfDay: 12.0, // 0-24
-    showStats: false,
-    debugMode: 0,
+    roadWidth: 3.0, footpathWidth: 1.2, dashLength: 0.8, dashWidth: 0.05,
+    maxSegments: 250, highwayStep: 15.0, streetStep: 8.0, branchProbability: 0.2, snapRadius: 2.0,
+    noiseScale: 0.005, noiseHeight: 20.0, noiseOffsetX: 0.0, noiseOffsetZ: 0.0,
+    grassColor: 0x33aa33, roadColor: 0x333333, footpathColor: 0x999999, centerLineColor: 0xffff00, laneLineColor: 0xffffff,
+    lampInterval: 12.0, lampIntensity: 2.0, lampRadius: 15.0, lampColor: 0xffaa44, lampOnTime: 18.5, lampOffTime: 6.5,
+    groundSegments: 64, timeOfDay: 12.0, showStats: false, debugMode: 0,
     generate: () => updateRoads()
 };
+
+// --- GPU Baker ---
+const BAKE_SIZE = 1024;
+const TERRAIN_SIZE = 1000.0;
+
+class GPUBaker {
+    renderTarget: THREE.WebGLRenderTarget;
+    scene: THREE.Scene;
+    camera: THREE.OrthographicCamera;
+    material: THREE.ShaderMaterial;
+    quad: THREE.Mesh;
+
+    constructor() {
+        this.renderTarget = new THREE.WebGLRenderTarget(BAKE_SIZE, BAKE_SIZE, {
+            format: THREE.RGBAFormat,
+            type: THREE.FloatType,
+            minFilter: THREE.LinearFilter,
+            magFilter: THREE.LinearFilter
+        });
+
+        this.scene = new THREE.Scene();
+        this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        this.material = new THREE.ShaderMaterial({
+            uniforms: {
+                numSegments: { value: 0 },
+                roadSegments: { value: new Array(256).fill(new THREE.Vector4()) },
+                roadTypes: { value: new Float32Array(256) },
+                roadWidth: { value: state.roadWidth },
+                footpathWidth: { value: state.footpathWidth },
+                lampInterval: { value: state.lampInterval },
+                lampRadius: { value: state.lampRadius },
+                uTerrainSize: { value: TERRAIN_SIZE }
+            },
+            vertexShader: bakeVertexShader,
+            fragmentShader: bakeFragmentShader
+        });
+        this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material);
+        this.scene.add(this.quad);
+    }
+
+    bake(renderer: THREE.WebGLRenderer, numSegments: number, segments: THREE.Vector4[], types: Float32Array) {
+        this.material.uniforms.numSegments!.value = numSegments;
+        this.material.uniforms.roadSegments!.value = segments;
+        this.material.uniforms.roadTypes!.value = types;
+        this.material.uniforms.roadWidth!.value = state.roadWidth;
+        this.material.uniforms.footpathWidth!.value = state.footpathWidth;
+        this.material.uniforms.lampInterval!.value = state.lampInterval;
+        this.material.uniforms.lampRadius!.value = state.lampRadius;
+
+        const oldTarget = renderer.getRenderTarget();
+        renderer.setRenderTarget(this.renderTarget);
+        renderer.render(this.scene, this.camera);
+        renderer.setRenderTarget(oldTarget);
+    }
+}
+
+const gpuBaker = new GPUBaker();
+
+// --- Material & Mesh ---
+const material = new THREE.ShaderMaterial({
+    uniforms: {
+        grassColor: { value: new THREE.Color(state.grassColor) },
+        roadColor: { value: new THREE.Color(state.roadColor) },
+        footpathColor: { value: new THREE.Color(state.footpathColor) },
+        centerLineColor: { value: new THREE.Color(state.centerLineColor) },
+        laneLineColor: { value: new THREE.Color(state.laneLineColor) },
+        roadWidth: { value: state.roadWidth },
+        footpathWidth: { value: state.footpathWidth },
+        dashLength: { value: state.dashLength },
+        dashWidth: { value: state.dashWidth },
+        numSegments: { value: 0 },
+        roadSegments: { value: new Array(256).fill(new THREE.Vector4()) },
+        roadTypes: { value: new Float32Array(256) },
+        lampIntensity: { value: state.lampIntensity },
+        lampColor: { value: new THREE.Color(state.lampColor) },
+        lampRadius: { value: state.lampRadius },
+        uNoiseScale: { value: state.noiseScale },
+        uNoiseHeight: { value: state.noiseHeight },
+        uNoiseOffset: { value: new THREE.Vector2() },
+        uSunDirection: { value: new THREE.Vector3() },
+        uSunColor: { value: new THREE.Color() },
+        uSunIntensity: { value: 1.0 },
+        uAmbientColor: { value: new THREE.Color() },
+        uBakeMap: { value: gpuBaker.renderTarget.texture },
+        uTerrainSize: { value: TERRAIN_SIZE },
+        uDebugMode: { value: 0 }
+    },
+    vertexShader,
+    fragmentShader
+});
+
+const geometry = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, state.groundSegments, state.groundSegments);
+geometry.rotateX(-Math.PI / 2);
+const ground = new THREE.Mesh(geometry, material);
+scene.add(ground);
 
 const gui = new dat.GUI();
 const roadFolder = gui.addFolder('Roads');
 roadFolder.add(state, 'pattern', ['grid', 'radial', 'organic']).onChange(() => updateRoads());
 roadFolder.add(state, 'roadWidth', 1.0, 10.0).onChange((v: number) => material.uniforms.roadWidth!.value = v);
-roadFolder.add(state, 'footpathWidth', 0.0, 5.0).onChange((v: number) => {
-    material.uniforms.footpathWidth!.value = v;
-    updateLamps();
-});
+roadFolder.add(state, 'footpathWidth', 0.0, 5.0).onChange((v: number) => { material.uniforms.footpathWidth!.value = v; updateLamps(); });
 roadFolder.addColor(state, 'roadColor').onChange(() => updateTimeOfDay());
 roadFolder.addColor(state, 'footpathColor').onChange(() => updateTimeOfDay());
 roadFolder.addColor(state, 'centerLineColor').onChange(() => updateTimeOfDay());
@@ -352,213 +402,50 @@ roadFolder.add(state, 'generate');
 roadFolder.open();
 
 const lampFolder = gui.addFolder('Streetlamps');
-lampFolder.add(state, 'lampInterval', 5.0, 50.0).onChange((v: number) => {
-    material.uniforms.lampInterval!.value = v;
-    updateLamps();
-});
+lampFolder.add(state, 'lampInterval', 5.0, 50.0).onChange((v: number) => { material.uniforms.lampInterval!.value = v; updateLamps(); });
 lampFolder.add(state, 'lampIntensity', 0.0, 10.0).onChange(() => updateTimeOfDay());
 lampFolder.add(state, 'lampRadius', 5.0, 50.0).onChange((v: number) => material.uniforms.lampRadius!.value = v);
-lampFolder.addColor(state, 'lampColor').onChange((v: any) => {
-    material.uniforms.lampColor!.value.set(v);
-    updateLamps();
-});
+lampFolder.addColor(state, 'lampColor').onChange((v: any) => { material.uniforms.lampColor!.value.set(v); updateLamps(); });
 lampFolder.add(state, 'lampOnTime', 0, 24).name('On Time').onChange(() => updateTimeOfDay());
 lampFolder.add(state, 'lampOffTime', 0, 24).name('Off Time').onChange(() => updateTimeOfDay());
 lampFolder.open();
 
 const terrainFolder = gui.addFolder('Terrain');
-terrainFolder.add(state, 'noiseScale', 0.0001, 0.02).onChange((v: number) => {
-    material.uniforms.uNoiseScale!.value = v;
-    updateLamps();
-    updateTimeOfDay();
-});
-terrainFolder.add(state, 'noiseHeight', 0.0, 100.0).onChange((v: number) => {
-    material.uniforms.uNoiseHeight!.value = v;
-    updateLamps();
-    updateTimeOfDay();
-});
-terrainFolder.add(state, 'noiseOffsetX', -100.0, 100.0).onChange((v: number) => {
-    material.uniforms.uNoiseOffset!.value.x = v;
-    updateLamps();
-    updateTimeOfDay();
-});
-terrainFolder.add(state, 'noiseOffsetZ', -100.0, 100.0).onChange((v: number) => {
-    material.uniforms.uNoiseOffset!.value.y = v;
-    updateLamps();
-    updateTimeOfDay();
-});
+terrainFolder.add(state, 'noiseScale', 0.0001, 0.02).onChange((v: number) => { material.uniforms.uNoiseScale!.value = v; updateLamps(); updateTimeOfDay(); });
+terrainFolder.add(state, 'noiseHeight', 0.0, 100.0).onChange((v: number) => { material.uniforms.uNoiseHeight!.value = v; updateLamps(); updateTimeOfDay(); });
+terrainFolder.add(state, 'noiseOffsetX', -100.0, 100.0).onChange((v: number) => { material.uniforms.uNoiseOffset!.value.x = v; updateLamps(); updateTimeOfDay(); });
+terrainFolder.add(state, 'noiseOffsetZ', -100.0, 100.0).onChange((v: number) => { material.uniforms.uNoiseOffset!.value.y = v; updateLamps(); updateTimeOfDay(); });
 terrainFolder.addColor(state, 'grassColor').onChange(() => updateTimeOfDay());
 terrainFolder.add(state, 'groundSegments', 1, 512).step(1).name('segments').onChange(() => updateGroundGeometry());
 terrainFolder.open();
 
 const environmentFolder = gui.addFolder('Environment');
 environmentFolder.add(state, 'timeOfDay', 0, 24).name('Time (0-24)').onChange(() => updateTimeOfDay());
-environmentFolder.add(state, 'showStats').name('Show Stats').onChange((v: boolean) => {
-    stats.dom.style.display = v ? 'block' : 'none';
-});
-environmentFolder.add(state, 'debugMode', { 'Off': 0, 'SDF': 1, 'Grid': 2, 'No Optimization': 3 }).name('Debug Mode').onChange((v: number) => material.uniforms.uDebugMode!.value = v);
+environmentFolder.add(state, 'showStats').name('Show Stats').onChange((v: boolean) => stats.dom.style.display = v ? 'block' : 'none');
+environmentFolder.add(state, 'debugMode', { 'Off': 0, 'SDF': 1, 'Grid': 2, 'No Optimization': 3, 'BakeMap': 4 }).name('Debug Mode').onChange((v: number) => material.uniforms.uDebugMode!.value = v);
 environmentFolder.open();
+
+// --- Lamp Meshes ---
+const MAX_LAMPS = 2048;
+const lampMat = new THREE.MeshStandardMaterial({ color: 0x666666, side: THREE.DoubleSide, roughness: 0.8, metalness: 0.2 });
+const lampPoleGeo = new THREE.PlaneGeometry(0.2, 3);
+const lampArmGeo = new THREE.PlaneGeometry(0.2, 0.9);
+const poleInstances = new THREE.InstancedMesh(lampPoleGeo, lampMat, MAX_LAMPS);
+const armInstances = new THREE.InstancedMesh(lampArmGeo, lampMat, MAX_LAMPS);
+scene.add(poleInstances, armInstances);
+
+const dummy = new THREE.Object3D();
 
 function distanceToSegmentSq(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
     const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
     if (l2 === 0) return (px - x1) * (px - x1) + (py - y1) * (py - y1);
     let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
     t = Math.max(0, Math.min(1, t));
-    const nx = x1 + t * (x2 - x1);
-    const ny = y1 + t * (y2 - y1);
-    return (px - nx) * (px - nx) + (py - ny) * (py - ny);
+    return (px - (x1 + t * (x2 - x1))) ** 2 + (py - (y1 + t * (y2 - y1))) ** 2;
 }
-
-// --- Optimization Textures ---
-const INDEX_MAP_SIZE = 512;
-const LIGHT_MAP_SIZE = 512; // High res for smooth lights
-const TERRAIN_SIZE = 1000.0;
-
-const indexMapData = new Float32Array(INDEX_MAP_SIZE * INDEX_MAP_SIZE * 4);
-const indexMapTexture = new THREE.DataTexture(indexMapData, INDEX_MAP_SIZE, INDEX_MAP_SIZE, THREE.RGBAFormat, THREE.FloatType);
-indexMapTexture.internalFormat = 'RGBA32F';
-indexMapTexture.minFilter = THREE.NearestFilter;
-indexMapTexture.magFilter = THREE.NearestFilter;
-indexMapTexture.needsUpdate = true;
-
-const lampLightData = new Float32Array(LIGHT_MAP_SIZE * LIGHT_MAP_SIZE * 4);
-const lampLightTexture = new THREE.DataTexture(lampLightData, LIGHT_MAP_SIZE, LIGHT_MAP_SIZE, THREE.RGBAFormat, THREE.FloatType);
-lampLightTexture.internalFormat = 'RGBA32F';
-lampLightTexture.minFilter = THREE.LinearFilter;
-lampLightTexture.magFilter = THREE.LinearFilter;
-lampLightTexture.needsUpdate = true;
-
-function updateOptimizationTextures(segments: Segment[]) {
-    indexMapData.fill(-1.0);
-    lampLightData.fill(0.0);
-
-    // 1. Bake Index Map (for roads/footpaths)
-    for (let y = 0; y < INDEX_MAP_SIZE; y++) {
-        for (let x = 0; x < INDEX_MAP_SIZE; x++) {
-            const px = (x / (INDEX_MAP_SIZE - 1) - 0.5) * TERRAIN_SIZE;
-            const py = (y / (INDEX_MAP_SIZE - 1) - 0.5) * TERRAIN_SIZE;
-            let minDistSq = Infinity;
-            let nearestIndex = -1;
-            for (let i = 0; i < segments.length; i++) {
-                const s = segments[i]!;
-                const dSq = distanceToSegmentSq(px, py, s.start.x, s.start.y, s.end.x, s.end.y);
-                if (dSq < minDistSq) {
-                    minDistSq = dSq;
-                    nearestIndex = i;
-                }
-            }
-            const pixelIndex = (y * INDEX_MAP_SIZE + x) * 4;
-            indexMapData[pixelIndex] = nearestIndex;
-            indexMapData[pixelIndex + 1] = Math.sqrt(minDistSq);
-        }
-    }
-    indexMapTexture.needsUpdate = true;
-
-    // 2. Bake Lamp Light Map (additive accumulation)
-    const interval = state.lampInterval;
-    const halfRoadWidth = state.roadWidth * 0.5;
-    const totalWidth = halfRoadWidth + state.footpathWidth;
-    const radiusSq = state.lampRadius * state.lampRadius;
-
-    segments.forEach(s => {
-        const len = s.start.distanceTo(s.end);
-        const dir = s.end.clone().sub(s.start).normalize();
-        const normal = new THREE.Vector2(-dir.y, dir.x);
-
-        for (let d = 0; d <= len; d += interval) {
-            [-1, 1].forEach(side => {
-                const lampPos = s.start.clone().add(dir.clone().multiplyScalar(d)).add(normal.clone().multiplyScalar(side * totalWidth));
-                
-                // Splat light pool into texture
-                const minTX = Math.floor(((lampPos.x - state.lampRadius) / TERRAIN_SIZE + 0.5) * LIGHT_MAP_SIZE);
-                const maxTX = Math.ceil(((lampPos.x + state.lampRadius) / TERRAIN_SIZE + 0.5) * LIGHT_MAP_SIZE);
-                const minTY = Math.floor(((lampPos.y - state.lampRadius) / TERRAIN_SIZE + 0.5) * LIGHT_MAP_SIZE);
-                const maxTY = Math.ceil(((lampPos.y + state.lampRadius) / TERRAIN_SIZE + 0.5) * LIGHT_MAP_SIZE);
-
-                for (let ty = Math.max(0, minTY); ty < Math.min(LIGHT_MAP_SIZE, maxTY); ty++) {
-                    for (let tx = Math.max(0, minTX); tx < Math.min(LIGHT_MAP_SIZE, maxTX); tx++) {
-                        const px = (tx / (LIGHT_MAP_SIZE - 1) - 0.5) * TERRAIN_SIZE;
-                        const py = (ty / (LIGHT_MAP_SIZE - 1) - 0.5) * TERRAIN_SIZE;
-                        const dx = px - lampPos.x;
-                        const dy = py - lampPos.y;
-                        const dSq = dx * dx + dy * dy;
-                        if (dSq < radiusSq) {
-                            const dNorm = Math.sqrt(dSq) / state.lampRadius;
-                            const falloff = Math.pow(1.0 - dNorm, 2.0); // Simple quadratic falloff
-                            lampLightData[(ty * LIGHT_MAP_SIZE + tx) * 4] += falloff; 
-                        }
-                    }
-                }
-            });
-        }
-    });
-    lampLightTexture.needsUpdate = true;
-}
-
-// --- Material & Mesh ---
-const material = new THREE.ShaderMaterial({
-    uniforms: {
-        grassColor: { value: new THREE.Color(state.grassColor) },
-        roadColor: { value: new THREE.Color(state.roadColor) },
-        footpathColor: { value: new THREE.Color(state.footpathColor) },
-        centerLineColor: { value: new THREE.Color(state.centerLineColor) },
-        laneLineColor: { value: new THREE.Color(state.laneLineColor) },
-        roadWidth: { value: state.roadWidth },
-        footpathWidth: { value: state.footpathWidth },
-        dashLength: { value: state.dashLength },
-        dashWidth: { value: state.dashWidth },
-        numSegments: { value: 0 },
-        roadSegments: { value: new Array(256).fill(new THREE.Vector4(0, 0, 0, 0)) },
-        roadTypes: { value: new Float32Array(256).fill(0) },
-        lampInterval: { value: state.lampInterval },
-        lampIntensity: { value: state.lampIntensity },
-        lampRadius: { value: state.lampRadius },
-        lampColor: { value: new THREE.Color(state.lampColor) },
-        uNoiseScale: { value: state.noiseScale },
-        uNoiseHeight: { value: state.noiseHeight },
-        uNoiseOffset: { value: new THREE.Vector2(state.noiseOffsetX, state.noiseOffsetZ) },
-        uSunDirection: { value: new THREE.Vector3(0, 1, 0) },
-        uSunColor: { value: new THREE.Color(0xffffff) },
-        uSunIntensity: { value: 1.0 },
-        uAmbientColor: { value: new THREE.Color(0x404040) },
-        uIndexMap: { value: indexMapTexture },
-        uLampLightMap: { value: lampLightTexture },
-        uTerrainSize: { value: TERRAIN_SIZE },
-        uDebugMode: { value: 0 }
-    },
-    vertexShader,
-    fragmentShader
-});
-
-const geometry = new THREE.PlaneGeometry(1000, 1000, state.groundSegments, state.groundSegments);
-geometry.rotateX(-Math.PI / 2);
-const ground = new THREE.Mesh(geometry, material);
-scene.add(ground);
-
-// --- Lamp Meshes ---
-// --- Lamp Meshes ---
-const MAX_LAMPS = 2048;
-const lampMat = new THREE.MeshStandardMaterial({ 
-    color: 0x666666, 
-    side: THREE.DoubleSide,
-    roughness: 0.8,
-    metalness: 0.2
-});
-const lampPoleGeo = new THREE.PlaneGeometry(0.2, 3);
-const lampArmGeo = new THREE.PlaneGeometry(0.2, 0.9);
-
-const poleInstances = new THREE.InstancedMesh(lampPoleGeo, lampMat, MAX_LAMPS);
-const armInstances = new THREE.InstancedMesh(lampArmGeo, lampMat, MAX_LAMPS);
-poleInstances.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-armInstances.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-scene.add(poleInstances);
-scene.add(armInstances);
-
-const dummy = new THREE.Object3D();
 
 function updateLamps() {
     let lampCount = 0;
-
     const segments = roadGenerator.segments;
     const interval = state.lampInterval;
     const halfRoadWidth = state.roadWidth * 0.5;
@@ -573,182 +460,106 @@ function updateLamps() {
         for (let d = 0; d <= len; d += interval) {
             [-1, 1].forEach(side => {
                 if (lampCount >= MAX_LAMPS) return;
-
                 const pos = s.start.clone().add(dir.clone().multiplyScalar(d)).add(normal.clone().multiplyScalar(side * totalWidth));
-                
-                // Intersection Check: Don't place lamps on other roads
                 let onOtherRoad = false;
                 for (const other of segments) {
                     if (other === s) continue;
                     const otherWidth = state.roadWidth * (other.type === 'highway' ? 1.5 : 1.0);
-                    const safeDistSq = (otherWidth * 0.5 + 0.5) * (otherWidth * 0.5 + 0.5);
-                    if (distanceToSegmentSq(pos.x, pos.y, other.start.x, other.start.y, other.end.x, other.end.y) < safeDistSq) {
-                        onOtherRoad = true;
-                        break;
+                    if (distanceToSegmentSq(pos.x, pos.y, other.start.x, other.start.y, other.end.x, other.end.y) < (otherWidth * 0.5 + 0.5) ** 2) {
+                        onOtherRoad = true; break;
                     }
                 }
                 if (onOtherRoad) return;
 
                 const height = getTerrainHeight(pos.x, pos.y);
-                
-                // Vertical Pole
                 dummy.position.set(pos.x, height + 1.5, pos.y);
-                dummy.rotation.set(0, -angle, 0);
-                dummy.scale.set(1, 1, 1);
-                dummy.updateMatrix();
+                dummy.rotation.set(0, -angle, 0); dummy.updateMatrix();
                 poleInstances.setMatrixAt(lampCount, dummy.matrix);
 
-                // Horizontal Arm
-                const armDir = normal.clone().multiplyScalar(-side); 
+                const armDir = normal.clone().multiplyScalar(-side);
                 dummy.position.set(pos.x + armDir.x * 0.45, height + 3, pos.y + armDir.y * 0.45);
-                dummy.rotation.set(Math.PI / 2, 0, -angle + Math.PI);
-                dummy.updateMatrix();
+                dummy.rotation.set(Math.PI / 2, 0, -angle + Math.PI); dummy.updateMatrix();
                 armInstances.setMatrixAt(lampCount, dummy.matrix);
-
                 lampCount++;
             });
         }
     });
-
-    poleInstances.count = lampCount;
-    armInstances.count = lampCount;
-    poleInstances.instanceMatrix.needsUpdate = true;
-    armInstances.instanceMatrix.needsUpdate = true;
+    poleInstances.count = lampCount; armInstances.count = lampCount;
+    poleInstances.instanceMatrix.needsUpdate = true; armInstances.instanceMatrix.needsUpdate = true;
 }
 
 function updateTimeOfDay() {
     const t = state.timeOfDay;
     const sunAngle = ((t - 6) / 12) * Math.PI;
     const isDay = t >= 6 && t <= 18;
-    
-    const sunPos = new THREE.Vector3(
-        Math.cos(sunAngle) * 200,
-        Math.sin(sunAngle) * 200,
-        50
-    );
+    const sunPos = new THREE.Vector3(Math.cos(sunAngle) * 200, Math.sin(sunAngle) * 200, 50);
     sunLight.position.copy(sunPos);
     material.uniforms.uSunDirection!.value.copy(sunPos).normalize();
 
-    let sunIntensity = 0;
-    let ambientIntensity = 0.1;
-    
-    if (isDay) {
-        sunIntensity = Math.pow(Math.sin(sunAngle), 0.5); 
-        ambientIntensity = 0.2 + 0.5 * sunIntensity;
-    } else {
-        sunIntensity = 0;
-        ambientIntensity = 0.1;
-    }
-
-    // Lamp Logic
+    let sunInt = isDay ? Math.pow(Math.sin(sunAngle), 0.5) : 0;
+    let ambInt = isDay ? 0.2 + 0.5 * sunInt : 0.1;
     let lampPower = 0;
-    const fadeWindow = 0.5;
-    const isNight = state.lampOnTime > state.lampOffTime 
-        ? (t >= state.lampOnTime || t <= state.lampOffTime)
-        : (t >= state.lampOnTime && t <= state.lampOffTime);
-
+    const fade = 0.5;
+    const isNight = state.lampOnTime > state.lampOffTime ? (t >= state.lampOnTime || t <= state.lampOffTime) : (t >= state.lampOnTime && t <= state.lampOffTime);
     if (isNight) {
         lampPower = state.lampIntensity;
         if (state.lampOnTime > state.lampOffTime) {
-            if (t >= state.lampOnTime && t < state.lampOnTime + fadeWindow) {
-                lampPower = THREE.MathUtils.smoothstep(t, state.lampOnTime, state.lampOnTime + fadeWindow) * state.lampIntensity;
-            } else if (t > state.lampOffTime - fadeWindow && t <= state.lampOffTime) {
-                lampPower = (1.0 - THREE.MathUtils.smoothstep(t, state.lampOffTime - fadeWindow, state.lampOffTime)) * state.lampIntensity;
-            }
+            if (t >= state.lampOnTime && t < state.lampOnTime + fade) lampPower *= THREE.MathUtils.smoothstep(t, state.lampOnTime, state.lampOnTime + fade);
+            else if (t > state.lampOffTime - fade && t <= state.lampOffTime) lampPower *= (1.0 - THREE.MathUtils.smoothstep(t, state.lampOffTime - fade, state.lampOffTime));
         }
     }
 
-    const dayColor = new THREE.Color(0xffffff);
-    const dawnColor = new THREE.Color(0xffaa44);
-    
-    let currentSunColor = new THREE.Color();
-    if (isDay) {
-        const dawnWeight = 1.0 - Math.sin(sunAngle);
-        currentSunColor.lerpColors(dayColor, dawnColor, dawnWeight);
-    } else {
-        currentSunColor.set(0x050510);
-    }
-
-    material.uniforms.uSunIntensity!.value = sunIntensity;
-    material.uniforms.uSunColor!.value.copy(currentSunColor);
-    material.uniforms.uAmbientColor!.value.setRGB(ambientIntensity, ambientIntensity, ambientIntensity * 1.1);
+    material.uniforms.uSunIntensity!.value = sunInt;
+    material.uniforms.uSunColor!.value.lerpColors(new THREE.Color(0xffaa44), new THREE.Color(0xffffff), Math.sin(sunAngle));
+    material.uniforms.uAmbientColor!.value.setRGB(ambInt, ambInt, ambInt * 1.1);
     material.uniforms.lampIntensity!.value = lampPower;
 
-    // Darken colors slightly at night
-    const colorLerpFactor = isDay ? THREE.MathUtils.smoothstep(Math.sin(sunAngle), 0.0, 0.2) : 0;
-    const nightDarkness = 0.3;
+    const lerp = isDay ? THREE.MathUtils.smoothstep(Math.sin(sunAngle), 0.0, 0.2) : 0;
+    const d = 0.3;
+    material.uniforms.grassColor!.value.lerpColors(new THREE.Color(state.grassColor).multiplyScalar(d), new THREE.Color(state.grassColor), lerp);
+    material.uniforms.roadColor!.value.lerpColors(new THREE.Color(state.roadColor).multiplyScalar(d), new THREE.Color(state.roadColor), lerp);
+    material.uniforms.footpathColor!.value.lerpColors(new THREE.Color(state.footpathColor).multiplyScalar(d), new THREE.Color(state.footpathColor), lerp);
+    material.uniforms.centerLineColor!.value.lerpColors(new THREE.Color(state.centerLineColor).multiplyScalar(d), new THREE.Color(state.centerLineColor), lerp);
+    material.uniforms.laneLineColor!.value.lerpColors(new THREE.Color(state.laneLineColor).multiplyScalar(d), new THREE.Color(state.laneLineColor), lerp);
 
-    const baseGrass = new THREE.Color(state.grassColor);
-    material.uniforms.grassColor!.value.lerpColors(baseGrass.clone().multiplyScalar(nightDarkness), baseGrass, colorLerpFactor);
-
-    const baseRoad = new THREE.Color(state.roadColor);
-    material.uniforms.roadColor!.value.lerpColors(baseRoad.clone().multiplyScalar(nightDarkness), baseRoad, colorLerpFactor);
-
-    const baseFootpath = new THREE.Color(state.footpathColor);
-    material.uniforms.footpathColor!.value.lerpColors(baseFootpath.clone().multiplyScalar(nightDarkness), baseFootpath, colorLerpFactor);
-
-    const baseCenter = new THREE.Color(state.centerLineColor);
-    material.uniforms.centerLineColor!.value.lerpColors(baseCenter.clone().multiplyScalar(nightDarkness), baseCenter, colorLerpFactor);
-
-    const baseLane = new THREE.Color(state.laneLineColor);
-    material.uniforms.laneLineColor!.value.lerpColors(baseLane.clone().multiplyScalar(nightDarkness), baseLane, colorLerpFactor);
-
-    const skyColor = new THREE.Color();
-    if (isDay) {
-        skyColor.lerpColors(new THREE.Color(0x87ceeb), new THREE.Color(0x0a0a20), 1.0 - Math.sin(sunAngle));
-    } else {
-        skyColor.set(0x050510);
-    }
-    scene.background = skyColor;
+    const sky = new THREE.Color();
+    if (isDay) sky.lerpColors(new THREE.Color(0x87ceeb), new THREE.Color(0x0a0a20), 1.0 - Math.sin(sunAngle));
+    else sky.set(0x050510);
+    scene.background = sky;
 }
 
 function updateGroundGeometry() {
     ground.geometry.dispose();
-    const newGeo = new THREE.PlaneGeometry(1000, 1000, state.groundSegments, state.groundSegments);
-    newGeo.rotateX(-Math.PI / 2);
-    ground.geometry = newGeo;
+    ground.geometry = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, state.groundSegments, state.groundSegments);
+    ground.geometry.rotateX(-Math.PI / 2);
 }
 
 function updateRoads() {
-    roadGenerator.maxSegments = state.maxSegments;
-    roadGenerator.highwayStepSize = state.highwayStep;
-    roadGenerator.streetStepSize = state.streetStep;
-    roadGenerator.snapRadius = state.snapRadius;
-    roadGenerator.branchProbability = state.branchProbability;
-    
+    roadGenerator.maxSegments = state.maxSegments; roadGenerator.highwayStepSize = state.highwayStep; roadGenerator.streetStepSize = state.streetStep;
+    roadGenerator.snapRadius = state.snapRadius; roadGenerator.branchProbability = state.branchProbability;
     const segments = roadGenerator.generate(state.pattern);
-    const shaderSegments = segments.map(s => new THREE.Vector4(s.start.x, s.start.y, s.end.x, s.end.y));
+    const shaderSegs = segments.map(s => new THREE.Vector4(s.start.x, s.start.y, s.end.x, s.end.y));
     const shaderTypes = segments.map(s => s.type === 'highway' ? 1.0 : 0.0);
-    
-    while (shaderSegments.length < 256) {
-        shaderSegments.push(new THREE.Vector4(0, 0, 0, 0));
-        shaderTypes.push(0.0);
-    }
-    
+    while (shaderSegs.length < 256) { shaderSegs.push(new THREE.Vector4()); shaderTypes.push(0); }
+
     material.uniforms.numSegments!.value = Math.min(segments.length, 256);
-    material.uniforms.roadSegments!.value = shaderSegments;
+    material.uniforms.roadSegments!.value = shaderSegs;
     material.uniforms.roadTypes!.value = new Float32Array(shaderTypes);
-    
-    updateOptimizationTextures(segments.slice(0, 256));
+
+    gpuBaker.bake(renderer, material.uniforms.numSegments!.value, shaderSegs, new Float32Array(shaderTypes));
     updateLamps();
 }
 
-// Initial Generation
-updateRoads();
-updateTimeOfDay();
+updateRoads(); updateTimeOfDay();
 
-// Animation
 function animate() {
-    stats.begin();
-    requestAnimationFrame(animate);
-    controls.update();
-    renderer.render(scene, camera);
+    stats.begin(); requestAnimationFrame(animate);
+    controls.update(); renderer.render(scene, camera);
     stats.end();
 }
 animate();
 
 window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
+    camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
