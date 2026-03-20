@@ -325,6 +325,7 @@ const state = {
     groundSegments: 64,
     timeOfDay: 12.0, // 0-24
     showStats: false,
+    debugMode: 0,
     generate: () => updateRoads()
 };
 
@@ -395,7 +396,105 @@ environmentFolder.add(state, 'timeOfDay', 0, 24).name('Time (0-24)').onChange(()
 environmentFolder.add(state, 'showStats').name('Show Stats').onChange((v: boolean) => {
     stats.dom.style.display = v ? 'block' : 'none';
 });
+environmentFolder.add(state, 'debugMode', { 'Off': 0, 'SDF': 1, 'Grid': 2, 'No Optimization': 3 }).name('Debug Mode').onChange((v: number) => material.uniforms.uDebugMode!.value = v);
 environmentFolder.open();
+
+function distanceToSegmentSq(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+    const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+    if (l2 === 0) return (px - x1) * (px - x1) + (py - y1) * (py - y1);
+    let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    const nx = x1 + t * (x2 - x1);
+    const ny = y1 + t * (y2 - y1);
+    return (px - nx) * (px - nx) + (py - ny) * (py - ny);
+}
+
+// --- Optimization Textures ---
+const INDEX_MAP_SIZE = 512;
+const LIGHT_MAP_SIZE = 512; // High res for smooth lights
+const TERRAIN_SIZE = 1000.0;
+
+const indexMapData = new Float32Array(INDEX_MAP_SIZE * INDEX_MAP_SIZE * 4);
+const indexMapTexture = new THREE.DataTexture(indexMapData, INDEX_MAP_SIZE, INDEX_MAP_SIZE, THREE.RGBAFormat, THREE.FloatType);
+indexMapTexture.internalFormat = 'RGBA32F';
+indexMapTexture.minFilter = THREE.NearestFilter;
+indexMapTexture.magFilter = THREE.NearestFilter;
+indexMapTexture.needsUpdate = true;
+
+const lampLightData = new Float32Array(LIGHT_MAP_SIZE * LIGHT_MAP_SIZE * 4);
+const lampLightTexture = new THREE.DataTexture(lampLightData, LIGHT_MAP_SIZE, LIGHT_MAP_SIZE, THREE.RGBAFormat, THREE.FloatType);
+lampLightTexture.internalFormat = 'RGBA32F';
+lampLightTexture.minFilter = THREE.LinearFilter;
+lampLightTexture.magFilter = THREE.LinearFilter;
+lampLightTexture.needsUpdate = true;
+
+function updateOptimizationTextures(segments: Segment[]) {
+    indexMapData.fill(-1.0);
+    lampLightData.fill(0.0);
+
+    // 1. Bake Index Map (for roads/footpaths)
+    for (let y = 0; y < INDEX_MAP_SIZE; y++) {
+        for (let x = 0; x < INDEX_MAP_SIZE; x++) {
+            const px = (x / (INDEX_MAP_SIZE - 1) - 0.5) * TERRAIN_SIZE;
+            const py = (y / (INDEX_MAP_SIZE - 1) - 0.5) * TERRAIN_SIZE;
+            let minDistSq = Infinity;
+            let nearestIndex = -1;
+            for (let i = 0; i < segments.length; i++) {
+                const s = segments[i]!;
+                const dSq = distanceToSegmentSq(px, py, s.start.x, s.start.y, s.end.x, s.end.y);
+                if (dSq < minDistSq) {
+                    minDistSq = dSq;
+                    nearestIndex = i;
+                }
+            }
+            const pixelIndex = (y * INDEX_MAP_SIZE + x) * 4;
+            indexMapData[pixelIndex] = nearestIndex;
+            indexMapData[pixelIndex + 1] = Math.sqrt(minDistSq);
+        }
+    }
+    indexMapTexture.needsUpdate = true;
+
+    // 2. Bake Lamp Light Map (additive accumulation)
+    const interval = state.lampInterval;
+    const halfRoadWidth = state.roadWidth * 0.5;
+    const totalWidth = halfRoadWidth + state.footpathWidth;
+    const radiusSq = state.lampRadius * state.lampRadius;
+
+    segments.forEach(s => {
+        if (s.type === 'highway') return;
+        const len = s.start.distanceTo(s.end);
+        const dir = s.end.clone().sub(s.start).normalize();
+        const normal = new THREE.Vector2(-dir.y, dir.x);
+
+        for (let d = 0; d <= len; d += interval) {
+            [-1, 1].forEach(side => {
+                const lampPos = s.start.clone().add(dir.clone().multiplyScalar(d)).add(normal.clone().multiplyScalar(side * totalWidth));
+                
+                // Splat light pool into texture
+                const minTX = Math.floor(((lampPos.x - state.lampRadius) / TERRAIN_SIZE + 0.5) * LIGHT_MAP_SIZE);
+                const maxTX = Math.ceil(((lampPos.x + state.lampRadius) / TERRAIN_SIZE + 0.5) * LIGHT_MAP_SIZE);
+                const minTY = Math.floor(((lampPos.y - state.lampRadius) / TERRAIN_SIZE + 0.5) * LIGHT_MAP_SIZE);
+                const maxTY = Math.ceil(((lampPos.y + state.lampRadius) / TERRAIN_SIZE + 0.5) * LIGHT_MAP_SIZE);
+
+                for (let ty = Math.max(0, minTY); ty < Math.min(LIGHT_MAP_SIZE, maxTY); ty++) {
+                    for (let tx = Math.max(0, minTX); tx < Math.min(LIGHT_MAP_SIZE, maxTX); tx++) {
+                        const px = (tx / (LIGHT_MAP_SIZE - 1) - 0.5) * TERRAIN_SIZE;
+                        const py = (ty / (LIGHT_MAP_SIZE - 1) - 0.5) * TERRAIN_SIZE;
+                        const dx = px - lampPos.x;
+                        const dy = py - lampPos.y;
+                        const dSq = dx * dx + dy * dy;
+                        if (dSq < radiusSq) {
+                            const dNorm = Math.sqrt(dSq) / state.lampRadius;
+                            const falloff = Math.pow(1.0 - dNorm, 2.0); // Simple quadratic falloff
+                            lampLightData[(ty * LIGHT_MAP_SIZE + tx) * 4] += falloff; 
+                        }
+                    }
+                }
+            });
+        }
+    });
+    lampLightTexture.needsUpdate = true;
+}
 
 // --- Material & Mesh ---
 const material = new THREE.ShaderMaterial({
@@ -422,7 +521,11 @@ const material = new THREE.ShaderMaterial({
         uSunDirection: { value: new THREE.Vector3(0, 1, 0) },
         uSunColor: { value: new THREE.Color(0xffffff) },
         uSunIntensity: { value: 1.0 },
-        uAmbientColor: { value: new THREE.Color(0x404040) }
+        uAmbientColor: { value: new THREE.Color(0x404040) },
+        uIndexMap: { value: indexMapTexture },
+        uLampLightMap: { value: lampLightTexture },
+        uTerrainSize: { value: TERRAIN_SIZE },
+        uDebugMode: { value: 0 }
     },
     vertexShader,
     fragmentShader
@@ -597,6 +700,7 @@ function updateRoads() {
     material.uniforms.roadSegments!.value = shaderSegments;
     material.uniforms.roadTypes!.value = new Float32Array(shaderTypes);
     
+    updateOptimizationTextures(segments.slice(0, 256));
     updateLamps();
 }
 
