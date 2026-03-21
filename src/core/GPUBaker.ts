@@ -25,8 +25,7 @@ export class GPUBaker {
         this.material = new THREE.ShaderMaterial({
             uniforms: {
                 numSegments: { value: 0 },
-                roadSegments: { value: new Array(256).fill(new THREE.Vector4()) },
-                roadTypes: { value: new Float32Array(256) },
+                uRoadData: { value: null },
                 roadWidth: { value: initialState.roadWidth },
                 footpathWidth: { value: initialState.footpathWidth },
                 lampInterval: { value: initialState.lampInterval },
@@ -40,14 +39,20 @@ export class GPUBaker {
         this.scene.add(this.quad);
     }
 
-    bake(renderer: THREE.WebGLRenderer, numSegments: number, segments: THREE.Vector4[], types: Float32Array, state: any) {
-        this.material.uniforms.numSegments!.value = numSegments;
-        this.material.uniforms.roadSegments!.value = segments;
-        this.material.uniforms.roadTypes!.value = types;
-        this.material.uniforms.roadWidth!.value = state.roadWidth;
-        this.material.uniforms.footpathWidth!.value = state.footpathWidth;
-        this.material.uniforms.lampInterval!.value = state.lampInterval;
-        this.material.uniforms.lampRadius!.value = state.lampRadius;
+    bake(renderer: THREE.WebGLRenderer, numSegments: number, roadTexture: THREE.Texture, inputState: any) {
+        if (!inputState) {
+            console.error('GPUBaker.bake called with undefined state');
+            return;
+        }
+        
+        const u = this.material.uniforms;
+        if (u['numSegments']) u['numSegments'].value = numSegments;
+        if (u['uRoadData']) u['uRoadData'].value = roadTexture;
+        
+        if (u['roadWidth']) u['roadWidth'].value = inputState.roadWidth;
+        if (u['footpathWidth']) u['footpathWidth'].value = inputState.footpathWidth;
+        if (u['lampInterval']) u['lampInterval'].value = inputState.lampInterval;
+        if (u['lampRadius']) u['lampRadius'].value = inputState.lampRadius;
 
         const oldTarget = renderer.getRenderTarget();
         renderer.setRenderTarget(this.renderTarget);

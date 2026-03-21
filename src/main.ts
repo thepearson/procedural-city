@@ -7,8 +7,8 @@ import vertexShader from './shaders/ground.vert.glsl';
 import fragmentShader from './shaders/ground.frag.glsl';
 
 import { RoadGenerator, TERRAIN_SIZE } from './core/RoadGenerator.js';
-import type { Segment } from './core/RoadGenerator.js';
 import { GPUBaker } from './core/GPUBaker.js';
+import { RoadTexture } from './core/RoadTexture.js';
 import { snoise } from './utils/noise.js';
 import { state } from './state.js';
 
@@ -48,11 +48,15 @@ controls.update();
 // --- Components ---
 const roadGenerator = new RoadGenerator();
 const gpuBaker = new GPUBaker(state);
+const roadTexture = new RoadTexture(1024);
 
 // --- Materials ---
 const material = new THREE.ShaderMaterial({
     uniforms: {
         grassColor: { value: new THREE.Color(state.grassColor) },
+        zoneCentralColor: { value: new THREE.Color(state.zoneCentralColor) },
+        zoneCommercialColor: { value: new THREE.Color(state.zoneCommercialColor) },
+        zoneResidentialColor: { value: new THREE.Color(state.zoneResidentialColor) },
         roadColor: { value: new THREE.Color(state.roadColor) },
         footpathColor: { value: new THREE.Color(state.footpathColor) },
         centerLineColor: { value: new THREE.Color(state.centerLineColor) },
@@ -62,8 +66,7 @@ const material = new THREE.ShaderMaterial({
         dashLength: { value: state.dashLength },
         dashWidth: { value: state.dashWidth },
         numSegments: { value: 0 },
-        roadSegments: { value: new Array(256).fill(new THREE.Vector4()) },
-        roadTypes: { value: new Float32Array(256) },
+        uRoadData: { value: roadTexture.texture },
         lampIntensity: { value: state.lampIntensity },
         lampColor: { value: new THREE.Color(state.lampColor) },
         lampRadius: { value: state.lampRadius },
@@ -76,7 +79,8 @@ const material = new THREE.ShaderMaterial({
         uAmbientColor: { value: new THREE.Color() },
         uBakeMap: { value: gpuBaker.renderTarget.texture },
         uTerrainSize: { value: TERRAIN_SIZE },
-        uDebugMode: { value: 0 }
+        uDebugMode: { value: 0 },
+        uShowBuildingZones: { value: state.showBuildingZones }
     },
     vertexShader,
     fragmentShader
@@ -111,7 +115,7 @@ function updateLamps() {
     const segments = roadGenerator.segments;
     const interval = state.lampInterval;
 
-    segments.forEach((s: Segment) => {
+    segments.forEach((s: any) => {
         const len = s.start.distanceTo(s.end);
         const dir = s.end.clone().sub(s.start).normalize();
         const normal = new THREE.Vector2(-dir.y, dir.x);
@@ -198,22 +202,23 @@ function updateRoads() {
     roadGenerator.maxSegments = state.maxSegments; roadGenerator.highwayStepSize = state.highwayStep; roadGenerator.streetStepSize = state.streetStep;
     roadGenerator.snapRadius = state.snapRadius; roadGenerator.branchProbability = state.branchProbability;
     const segments = roadGenerator.generate(state.pattern);
-    const shaderSegs = segments.map((s: Segment) => new THREE.Vector4(s.start.x, s.start.y, s.end.x, s.end.y));
-    const shaderTypes = segments.map((s: Segment) => s.type === 'highway' ? 1.0 : 0.0);
-    while (shaderSegs.length < 256) { shaderSegs.push(new THREE.Vector4()); shaderTypes.push(0); }
+    
+    const shaderSegs = segments.map((s: any) => new THREE.Vector4(s.start.x, s.start.y, s.end.x, s.end.y));
+    const shaderTypes = segments.map((s: any) => s.type === 'highway' ? 1.0 : 0.0);
+    
+    roadTexture.update(shaderSegs, new Float32Array(shaderTypes));
 
-    material.uniforms.numSegments!.value = Math.min(segments.length, 256);
-    material.uniforms.roadSegments!.value = shaderSegs;
-    material.uniforms.roadTypes!.value = new Float32Array(shaderTypes);
+    material.uniforms.numSegments!.value = Math.min(segments.length, 1024);
 
-    gpuBaker.bake(renderer, material.uniforms.numSegments!.value, shaderSegs, new Float32Array(shaderTypes), state);
+    if (renderer) {
+        gpuBaker.bake(renderer, material.uniforms.numSegments!.value, roadTexture.texture, state);
+    }
     updateLamps();
 }
 
-state.generate = () => updateRoads();
-
 // --- GUI ---
 const gui = new dat.GUI();
+
 const roadFolder = gui.addFolder('Roads');
 roadFolder.add(state, 'pattern', ['grid', 'radial', 'organic']).onChange(() => updateRoads());
 roadFolder.add(state, 'roadWidth', 1.0, 10.0).onChange((v: number) => material.uniforms.roadWidth!.value = v);
@@ -225,11 +230,11 @@ roadFolder.addColor(state, 'laneLineColor').onChange(() => updateTimeOfDay());
 roadFolder.add(state, 'dashLength', 0.1, 5.0).onChange((v: number) => material.uniforms.dashLength!.value = v);
 roadFolder.add(state, 'dashWidth', 0.01, 0.5).onChange((v: number) => material.uniforms.dashWidth!.value = v);
 roadFolder.add(state, 'branchProbability', 0.0, 1.0).name('density').onChange(() => updateRoads());
-roadFolder.add(state, 'maxSegments', 10, 256).step(1).onChange(() => updateRoads());
+roadFolder.add(state, 'maxSegments', 10, 1024).step(1).onChange(() => updateRoads());
 roadFolder.add(state, 'highwayStep', 5.0, 30.0).onChange(() => updateRoads());
 roadFolder.add(state, 'streetStep', 2.0, 20.0).onChange(() => updateRoads());
 roadFolder.add(state, 'snapRadius', 1.0, 10.0).onChange(() => updateRoads());
-roadFolder.add(state, 'generate');
+roadFolder.add({ generate: updateRoads }, 'generate').name('Generate');
 roadFolder.open();
 
 const lampFolder = gui.addFolder('Streetlamps');
@@ -258,16 +263,27 @@ terrainFolder.add(state, 'groundSegments', 1, 512).step(1).name('segments').onCh
 terrainFolder.open();
 
 const environmentFolder = gui.addFolder('Environment');
+const zoningFolder = gui.addFolder('Zoning');
+zoningFolder.add(state, 'showBuildingZones').name('Show Building Zones').onChange((v: boolean) => material.uniforms.uShowBuildingZones!.value = v);
+zoningFolder.addColor(state, 'zoneCentralColor').name('Central Color').onChange((v: number) => material.uniforms.zoneCentralColor!.value.set(v));
+zoningFolder.addColor(state, 'zoneCommercialColor').name('Commercial Color').onChange((v: number) => material.uniforms.zoneCommercialColor!.value.set(v));
+zoningFolder.addColor(state, 'zoneResidentialColor').name('Residential Color').onChange((v: number) => material.uniforms.zoneResidentialColor!.value.set(v));
+zoningFolder.open();
+
 environmentFolder.add(state, 'timeOfDay', 0, 24).name('Time (0-24)').onChange(() => updateTimeOfDay());
 environmentFolder.add(state, 'showStats').name('Show Stats').onChange((v: boolean) => stats.dom.style.display = v ? 'block' : 'none');
 environmentFolder.add(state, 'debugMode', { 'Off': 0, 'SDF': 1, 'Grid': 2, 'No Optimization': 3, 'BakeMap': 4 }).name('Debug Mode').onChange((v: number) => material.uniforms.uDebugMode!.value = v);
 environmentFolder.open();
 
 // --- Init ---
-updateRoads();
-updateTimeOfDay();
+let firstFrame = true;
 
 function animate() {
+    if (firstFrame) {
+        updateRoads();
+        updateTimeOfDay();
+        firstFrame = false;
+    }
     stats.begin();
     requestAnimationFrame(animate);
     controls.update();

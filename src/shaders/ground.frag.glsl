@@ -1,4 +1,7 @@
 uniform vec3 grassColor;
+uniform vec3 zoneCentralColor;
+uniform vec3 zoneCommercialColor;
+uniform vec3 zoneResidentialColor;
 uniform vec3 roadColor;
 uniform vec3 footpathColor;
 uniform vec3 centerLineColor;
@@ -8,8 +11,9 @@ uniform float footpathWidth;
 uniform float dashLength;
 uniform float dashWidth;
 uniform float numSegments;
-uniform vec4 roadSegments[256]; // x1, z1, x2, z2
-uniform float roadTypes[256];    // 0 = street, 1 = highway
+
+// Data Texture for Road Data
+uniform sampler2D uRoadData; // Row 0: Coords (x1,y1,x2,y2), Row 1: Type
 
 uniform float lampIntensity;
 uniform vec3 lampColor;
@@ -24,9 +28,17 @@ uniform vec3 uAmbientColor;
 uniform sampler2D uBakeMap; // R: nearest index, G: distance, B: total lamp intensity
 uniform float uTerrainSize;
 uniform int uDebugMode;
+uniform bool uShowBuildingZones;
 
 varying vec2 vUv;
 varying vec3 vPosition;
+
+void getRoadSegment(int index, out vec4 coords, out float type) {
+    float fi = float(index);
+    float u = (fi + 0.5) / 1024.0; 
+    coords = texture2D(uRoadData, vec2(u, 0.25)); // Row 0
+    type = texture2D(uRoadData, vec2(u, 0.75)).r;  // Row 1
+}
 
 float distanceToSegment(vec2 p, vec2 a, vec2 b, out float bFactor, out float uFactor) {
     vec2 v = b - a;
@@ -83,8 +95,11 @@ void main() {
     if (nearestIndexFloat >= 0.0 && uDebugMode != 3) {
         int segIndex = int(nearestIndexFloat + 0.5);
         float b, u;
-        float dist = distanceToSegment(p, roadSegments[segIndex].xy, roadSegments[segIndex].zw, b, u);
-        float currentType = roadTypes[segIndex];
+        vec4 coords;
+        float currentType;
+        getRoadSegment(segIndex, coords, currentType);
+        
+        float dist = distanceToSegment(p, coords.xy, coords.zw, b, u);
         float currentRoadWidth = roadWidth * (currentType > 0.5 ? 1.5 : 1.0);
         float halfRoadWidth = currentRoadWidth * 0.5;
         float currentFootpathWidth = currentType < 0.5 ? footpathWidth : 0.0;
@@ -98,11 +113,14 @@ void main() {
     } else if (uDebugMode == 3) {
         // Mode 3: Fallback full loop
         float minDist = 1e10;
-        for (int i = 0; i < 256; i++) {
+        for (int i = 0; i < 1024; i++) {
             if (float(i) >= numSegments) break;
             float b, u;
-            float dist = distanceToSegment(p, roadSegments[i].xy, roadSegments[i].zw, b, u);
-            float currentType = roadTypes[i];
+            vec4 coords;
+            float currentType;
+            getRoadSegment(i, coords, currentType);
+            
+            float dist = distanceToSegment(p, coords.xy, coords.zw, b, u);
             float currentRoadWidth = roadWidth * (currentType > 0.5 ? 1.5 : 1.0);
             float halfRoadWidth = currentRoadWidth * 0.5;
             float halfTotalWidth = halfRoadWidth + (currentType < 0.5 ? footpathWidth : 0.0);
@@ -129,6 +147,25 @@ void main() {
         float tileSize = 1.0;
         float tilePattern = step(0.05, fract(bestB / tileSize)) * step(0.05, fract(abs(bestU) / tileSize));
         baseColor *= (0.9 + 0.1 * tilePattern);
+    } else if (uShowBuildingZones) {
+        // --- 3-Zone System ---
+        float maxBuildingDist = 30.0;
+        if (sdfDist < maxBuildingDist) {
+            float distFromCenter = length(p);
+            vec3 targetZoneColor = zoneResidentialColor;
+            float commercialNoise = fract(sin(dot(floor(p * 0.05), vec2(12.9898, 78.233))) * 43758.5453);
+            
+            if (distFromCenter < 150.0) {
+                targetZoneColor = zoneCentralColor;
+            } else if (distFromCenter < 350.0 || commercialNoise > 0.8) {
+                targetZoneColor = zoneCommercialColor;
+            }
+            
+            float intensity = 1.0 - (sdfDist / maxBuildingDist);
+            vec3 zonedColor = mix(baseColor, targetZoneColor, 0.7);
+            float grid = step(0.1, fract(p.x * 0.2)) * step(0.1, fract(p.y * 0.2));
+            baseColor = mix(baseColor, zonedColor * (0.9 + 0.1 * grid), intensity);
+        }
     }
     
     // Final Lighting

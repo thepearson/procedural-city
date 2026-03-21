@@ -4,7 +4,7 @@ export const state = {
     footpathWidth: 1.2,
     dashLength: 0.8,
     dashWidth: 0.05,
-    maxSegments: 256,
+    maxSegments: 512,
     highwayStep: 15.0,
     streetStep: 8.0,
     branchProbability: 0.2,
@@ -13,7 +13,10 @@ export const state = {
     noiseHeight: 20.0,
     noiseOffsetX: 0.0,
     noiseOffsetZ: 0.0,
-    grassColor: 0x4f754f, // Updated base grass color
+    grassColor: 0x4f754f,
+    zoneCentralColor: 0x444444,
+    zoneCommercialColor: 0x555566,
+    zoneResidentialColor: 0x776655,
     roadColor: 0x333333,
     footpathColor: 0x999999,
     centerLineColor: 0xffff00,
@@ -25,8 +28,8 @@ export const state = {
     lampOnTime: 18.5,
     lampOffTime: 6.5,
     groundSegments: 64,
+    showBuildingZones: true,
     timeOfDay: 12.0, // 0-24
     showStats: false,
-    debugMode: 0,
-    generate: () => {} // Placeholder, will be replaced in main.ts
+    debugMode: 0
 };

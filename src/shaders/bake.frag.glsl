@@ -1,6 +1,5 @@
 uniform float numSegments;
-uniform vec4 roadSegments[256];
-uniform float roadTypes[256];
+uniform sampler2D uRoadData; // Row 0: Coords, Row 1: Type
 uniform float roadWidth;
 uniform float footpathWidth;
 uniform float lampInterval;
@@ -8,6 +7,13 @@ uniform float lampRadius;
 uniform float uTerrainSize;
 
 varying vec2 vUv;
+
+void getRoadSegment(int index, out vec4 coords, out float type) {
+    float fi = float(index);
+    float u = (fi + 0.5) / 1024.0; 
+    coords = texture2D(uRoadData, vec2(u, 0.25)); // Row 0
+    type = texture2D(uRoadData, vec2(u, 0.75)).r;  // Row 1
+}
 
 float distanceToSegment(vec2 p, vec2 a, vec2 b, out float bFactor, out float uFactor) {
     vec2 v = b - a;
@@ -33,11 +39,15 @@ void main() {
     float nearestIndex = -1.0;
     float totalLampLight = 0.0;
 
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < 1024; i++) {
         if (float(i) >= numSegments) break;
         
-        vec2 a = roadSegments[i].xy;
-        vec2 b_pos = roadSegments[i].zw;
+        vec4 coords;
+        float currentType;
+        getRoadSegment(i, coords, currentType);
+        
+        vec2 a = coords.xy;
+        vec2 b_pos = coords.zw;
         float b, u;
         float dist = distanceToSegment(p, a, b_pos, b, u);
         
@@ -49,7 +59,6 @@ void main() {
 
         // 2. Accumulate Lighting from ALL segments (independent of nearest)
         if (lampInterval > 0.0) {
-            float currentType = roadTypes[i];
             float currentRoadWidth = roadWidth * (currentType > 0.5 ? 1.5 : 1.0);
             float halfRoadWidth = currentRoadWidth * 0.5;
             float currentFootpathWidth = (currentType < 0.5) ? footpathWidth : 0.0;

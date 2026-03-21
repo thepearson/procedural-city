@@ -16,14 +16,14 @@ export class RoadGenerator {
     snapRadius = 2.0;
     highwayStepSize = 15.0;
     streetStepSize = 8.0;
-    maxSegments = 256;
+    maxSegments = 1024;
     branchProbability = 0.5;
 
     generate(pattern: 'grid' | 'radial' | 'organic' = 'grid'): Segment[] {
         this.segments = [];
         this.queue = [];
         
-        // Initial highway segments to start from center in 4 directions
+        // Initial seeds: 4 highways from center
         const directions = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
         directions.forEach(angle => {
             this.queue.push({
@@ -35,6 +35,7 @@ export class RoadGenerator {
             });
         });
 
+        // BFS Queue: Naturally grows layer-by-layer from the seeds
         while (this.queue.length > 0 && this.segments.length < this.maxSegments) {
             const s = this.queue.shift()!;
             this.applyLocalConstraints(s);
