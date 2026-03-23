@@ -1,23 +1,26 @@
 import * as THREE from 'three';
+import type { BuildingData } from './CityPlanner.js';
 
 export class RoadTexture {
     texture: THREE.DataTexture;
     private data: Float32Array;
-    private size: number;
+    private maxSegments: number;
+    private maxBuildings: number;
 
-    constructor(maxSegments: number = 1024) {
-        this.size = maxSegments;
-        // Each segment needs: start.x, start.y, end.x, end.y, type
-        // We'll use an RGBA texture where:
-        // Pixel i: R=start.x, G=start.y, B=end.x, A=end.y
-        // Pixel i+maxSegments: R=type, G=0, B=0, A=0 (or similar packing)
-        // More efficient: 2 pixels per segment or a larger texture.
-        // Let's use 2 rows: Row 0 = Coordinates, Row 1 = Types
-        this.data = new Float32Array(this.size * 2 * 4); 
+    constructor(maxBuildings: number = 8192) {
+        this.maxSegments = 1024;
+        this.maxBuildings = maxBuildings;
+        // 4 rows: 
+        // 0: Road Coords (1024), 
+        // 1: Road Types (1024), 
+        // 2: Building Pos (x,z), Scale (width,depth) (8192)
+        // 3: Building Rotation, Padding (8192)
+        // Texture width will be 8192 to accommodate buildings
+        this.data = new Float32Array(this.maxBuildings * 4 * 4); 
         this.texture = new THREE.DataTexture(
             this.data, 
-            this.size, 
-            2, 
+            this.maxBuildings, 
+            4, 
             THREE.RGBAFormat, 
             THREE.FloatType
         );
@@ -26,22 +29,39 @@ export class RoadTexture {
         this.texture.needsUpdate = true;
     }
 
-    update(segments: THREE.Vector4[], types: Float32Array) {
-        for (let i = 0; i < this.size; i++) {
-            const seg = segments[i] || new THREE.Vector4();
-            const type = types[i] || 0;
+    update(segments: THREE.Vector4[], types: Float32Array, buildings: BuildingData[]) {
+        // 1. Reset data
+        this.data.fill(0);
 
-            // Row 0: Coords (x1, y1, x2, y2)
-            const coordIdx = i * 4;
-            this.data[coordIdx] = seg.x;
-            this.data[coordIdx + 1] = seg.y;
-            this.data[coordIdx + 2] = seg.z;
-            this.data[coordIdx + 3] = seg.w;
-
-            // Row 1: Type (using R channel)
-            const typeIdx = (this.size + i) * 4;
-            this.data[typeIdx] = type;
+        // 2. Fill Roads (up to 1024)
+        for (let i = 0; i < Math.min(segments.length, this.maxSegments); i++) {
+            const seg = segments[i]!;
+            const idx = i * 4;
+            this.data[idx] = seg.x;
+            this.data[idx + 1] = seg.y;
+            this.data[idx + 2] = seg.z;
+            this.data[idx + 3] = seg.w;
+            // Row 1 (Road Types)
+            this.data[this.maxBuildings * 4 + idx] = types[i]!;
         }
+
+        // 3. Fill Buildings (up to 4096)
+        for (let i = 0; i < Math.min(buildings.length, this.maxBuildings); i++) {
+            const b = buildings[i]!;
+            const idx = i * 4;
+            
+            // Row 2: X, Z (pos), W, D (scale)
+            const row2 = this.maxBuildings * 8 + idx;
+            this.data[row2] = b.pos.x;
+            this.data[row2 + 1] = b.pos.z;
+            this.data[row2 + 2] = b.scale.x;
+            this.data[row2 + 3] = b.scale.z;
+
+            // Row 3: Rotation
+            const row3 = this.maxBuildings * 12 + idx;
+            this.data[row3] = b.rotation;
+        }
+
         this.texture.needsUpdate = true;
     }
 }

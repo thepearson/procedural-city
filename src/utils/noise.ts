@@ -1,10 +1,14 @@
 import * as THREE from 'three';
 
+function mod(x: number, y: number): number {
+    return x - y * Math.floor(x / y);
+}
+
 function permute(x: THREE.Vector3): THREE.Vector3 {
     return new THREE.Vector3(
-        ((x.x * 34.0) + 1.0) * x.x % 289.0,
-        ((x.y * 34.0) + 1.0) * x.y % 289.0,
-        ((x.z * 34.0) + 1.0) * x.z % 289.0
+        mod(((x.x * 34.0) + 1.0) * x.x, 289.0),
+        mod(((x.y * 34.0) + 1.0) * x.y, 289.0),
+        mod(((x.z * 34.0) + 1.0) * x.z, 289.0)
     );
 }
 
@@ -22,9 +26,8 @@ export function snoise(v: THREE.Vector2): number {
     let i1 = (x0.x > x0.y) ? new THREE.Vector2(1.0, 0.0) : new THREE.Vector2(0.0, 1.0);
     let x12 = new THREE.Vector4(x0.x + C.x - i1.x, x0.y + C.x - i1.y, x0.x + C.z, x0.y + C.z);
 
-    let i_mod = new THREE.Vector2(i.x % 289.0, i.y % 289.0);
-    let p = permute(permute(new THREE.Vector3(i_mod.y, i_mod.y + i1.y, i_mod.y + 1.0))
-        .add(new THREE.Vector3(i_mod.x, i_mod.x + i1.x, i_mod.x + 1.0)));
+    let p = permute(permute(new THREE.Vector3(mod(i.y, 289.0), mod(i.y + i1.y, 289.0), mod(i.y + 1.0, 289.0)))
+        .add(new THREE.Vector3(mod(i.x, 289.0), mod(i.x + i1.x, 289.0), mod(i.x + 1.0, 289.0))));
 
     let m = new THREE.Vector3(
         Math.max(0.5 - (x0.x * x0.x + x0.y * x0.y), 0.0),
@@ -36,9 +39,9 @@ export function snoise(v: THREE.Vector2): number {
     m.z = m.z * m.z * m.z * m.z;
 
     let x = new THREE.Vector3(
-        2.0 * (p.x * C.w % 1.0) - 1.0,
-        2.0 * (p.y * C.w % 1.0) - 1.0,
-        2.0 * (p.z * C.w % 1.0) - 1.0
+        2.0 * mod(p.x * C.w, 1.0) - 1.0,
+        2.0 * mod(p.y * C.w, 1.0) - 1.0,
+        2.0 * mod(p.z * C.w, 1.0) - 1.0
     );
     let h = new THREE.Vector3(Math.abs(x.x) - 0.5, Math.abs(x.y) - 0.5, Math.abs(x.z) - 0.5);
     let ox = new THREE.Vector3(Math.floor(x.x + 0.5), Math.floor(x.y + 0.5), Math.floor(x.z + 0.5));

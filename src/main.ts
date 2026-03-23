@@ -9,6 +9,9 @@ import fragmentShader from './shaders/ground.frag.glsl';
 import { RoadGenerator, TERRAIN_SIZE } from './core/RoadGenerator.js';
 import { GPUBaker } from './core/GPUBaker.js';
 import { RoadTexture } from './core/RoadTexture.js';
+import { BuildingRenderer } from './core/BuildingRenderer.js';
+import { CityPlanner } from './core/CityPlanner.js';
+import type { BuildingData } from './core/CityPlanner.js';
 import { snoise } from './utils/noise.js';
 import { state } from './state.js';
 
@@ -18,7 +21,7 @@ stats.showPanel(0);
 stats.dom.style.display = 'none';
 document.body.appendChild(stats.dom);
 
-function getTerrainHeight(x: number, z: number): number {
+export function getTerrainHeight(x: number, z: number): number {
     const fNoiseMultiplier = 16.0;
     const p = new THREE.Vector2(x, z);
     const n1 = snoise(p.clone().multiplyScalar(state.noiseScale).add(new THREE.Vector2(state.noiseOffsetX, state.noiseOffsetZ)));
@@ -48,7 +51,8 @@ controls.update();
 // --- Components ---
 const roadGenerator = new RoadGenerator();
 const gpuBaker = new GPUBaker(state);
-const roadTexture = new RoadTexture(1024);
+const roadTexture = new RoadTexture(8192);
+const buildingRenderer = new BuildingRenderer(scene, 8192);
 
 // --- Materials ---
 const material = new THREE.ShaderMaterial({
@@ -57,6 +61,7 @@ const material = new THREE.ShaderMaterial({
         zoneCentralColor: { value: new THREE.Color(state.zoneCentralColor) },
         zoneCommercialColor: { value: new THREE.Color(state.zoneCommercialColor) },
         zoneResidentialColor: { value: new THREE.Color(state.zoneResidentialColor) },
+        zoneBuildingColor: { value: new THREE.Color(state.zoneBuildingColor) },
         roadColor: { value: new THREE.Color(state.roadColor) },
         footpathColor: { value: new THREE.Color(state.footpathColor) },
         centerLineColor: { value: new THREE.Color(state.centerLineColor) },
@@ -66,6 +71,7 @@ const material = new THREE.ShaderMaterial({
         dashLength: { value: state.dashLength },
         dashWidth: { value: state.dashWidth },
         numSegments: { value: 0 },
+        numBuildings: { value: 0 },
         uRoadData: { value: roadTexture.texture },
         lampIntensity: { value: state.lampIntensity },
         lampColor: { value: new THREE.Color(state.lampColor) },
@@ -80,7 +86,8 @@ const material = new THREE.ShaderMaterial({
         uBakeMap: { value: gpuBaker.renderTarget.texture },
         uTerrainSize: { value: TERRAIN_SIZE },
         uDebugMode: { value: 0 },
-        uShowBuildingZones: { value: state.showBuildingZones }
+        uShowBuildingZones: { value: state.showBuildingZones ? 1 : 0 },
+        uBuildingDensity: { value: state.buildingDensity }
     },
     vertexShader,
     fragmentShader
@@ -184,6 +191,13 @@ function updateTimeOfDay() {
     material.uniforms.uAmbientColor!.value.setRGB(ambInt, ambInt, ambInt * 1.1);
     material.uniforms.lampIntensity!.value = lampPower;
 
+    // Update Building Material
+    buildingRenderer.material.uniforms.uSunDirection.value.copy(sunLight.position).normalize();
+    buildingRenderer.material.uniforms.uSunColor.value.copy(material.uniforms.uSunColor.value);
+    buildingRenderer.material.uniforms.uSunIntensity.value = sunInt;
+    buildingRenderer.material.uniforms.uAmbientColor.value.copy(material.uniforms.uAmbientColor.value);
+    buildingRenderer.material.uniforms.uLampIntensity.value = lampPower;
+
     const lerp = isDay ? THREE.MathUtils.smoothstep(Math.sin(sunAngle), 0.0, 0.2) : 0;
     const d = 0.3;
     material.uniforms.grassColor!.value.lerpColors(new THREE.Color(state.grassColor).multiplyScalar(d), new THREE.Color(state.grassColor), lerp);
@@ -202,18 +216,26 @@ function updateRoads() {
     roadGenerator.maxSegments = state.maxSegments; roadGenerator.highwayStepSize = state.highwayStep; roadGenerator.streetStepSize = state.streetStep;
     roadGenerator.snapRadius = state.snapRadius; roadGenerator.branchProbability = state.branchProbability;
     const segments = roadGenerator.generate(state.pattern);
+    console.log(`Generated ${segments.length} road segments.`);
     
+    // 1. Plan Buildings (Unified Source of Truth)
+    const buildings = CityPlanner.planBuildings(segments);
+    
+    // 2. Update Texture
     const shaderSegs = segments.map((s: any) => new THREE.Vector4(s.start.x, s.start.y, s.end.x, s.end.y));
     const shaderTypes = segments.map((s: any) => s.type === 'highway' ? 1.0 : 0.0);
-    
-    roadTexture.update(shaderSegs, new Float32Array(shaderTypes));
+    roadTexture.update(shaderSegs, new Float32Array(shaderTypes), buildings);
 
+    // 3. Update Material Uniforms
     material.uniforms.numSegments!.value = Math.min(segments.length, 1024);
+    material.uniforms.numBuildings!.value = Math.min(buildings.length, 8192);
 
+    // 4. Update Renderer & Baker
     if (renderer) {
-        gpuBaker.bake(renderer, material.uniforms.numSegments!.value, roadTexture.texture, state);
+        gpuBaker.bake(renderer, material.uniforms.numSegments!.value, material.uniforms.numBuildings!.value, roadTexture.texture, state);
     }
     updateLamps();
+    buildingRenderer.render(buildings);
 }
 
 // --- GUI ---
@@ -247,10 +269,30 @@ lampFolder.add(state, 'lampOffTime', 0, 24).name('Off Time').onChange(() => upda
 lampFolder.open();
 
 const terrainFolder = gui.addFolder('Terrain');
-terrainFolder.add(state, 'noiseScale', 0.0001, 0.02).onChange((v: number) => { material.uniforms.uNoiseScale!.value = v; updateLamps(); updateTimeOfDay(); });
-terrainFolder.add(state, 'noiseHeight', 0.0, 100.0).onChange((v: number) => { material.uniforms.uNoiseHeight!.value = v; updateLamps(); updateTimeOfDay(); });
-terrainFolder.add(state, 'noiseOffsetX', -100.0, 100.0).onChange((v: number) => { material.uniforms.uNoiseOffset!.value.x = v; updateLamps(); updateTimeOfDay(); });
-terrainFolder.add(state, 'noiseOffsetZ', -100.0, 100.0).onChange((v: number) => { material.uniforms.uNoiseOffset!.value.y = v; updateLamps(); updateTimeOfDay(); });
+terrainFolder.add(state, 'noiseScale', 0.0001, 0.02).onChange((v: number) => { 
+    material.uniforms.uNoiseScale!.value = v; 
+    updateLamps(); 
+    updateTimeOfDay(); 
+    updateRoads();
+});
+terrainFolder.add(state, 'noiseHeight', 0.0, 100.0).onChange((v: number) => { 
+    material.uniforms.uNoiseHeight!.value = v; 
+    updateLamps(); 
+    updateTimeOfDay(); 
+    updateRoads();
+});
+terrainFolder.add(state, 'noiseOffsetX', -100.0, 100.0).onChange((v: number) => { 
+    material.uniforms.uNoiseOffset!.value.x = v; 
+    updateLamps(); 
+    updateTimeOfDay(); 
+    updateRoads();
+});
+terrainFolder.add(state, 'noiseOffsetZ', -100.0, 100.0).onChange((v: number) => { 
+    material.uniforms.uNoiseOffset!.value.y = v; 
+    updateLamps(); 
+    updateTimeOfDay(); 
+    updateRoads();
+});
 terrainFolder.addColor(state, 'grassColor').onChange((v: number) => {
     state.grassColor = v;
     updateTimeOfDay();
@@ -264,25 +306,31 @@ terrainFolder.open();
 
 const environmentFolder = gui.addFolder('Environment');
 const zoningFolder = gui.addFolder('Zoning');
-zoningFolder.add(state, 'showBuildingZones').name('Show Building Zones').onChange((v: boolean) => material.uniforms.uShowBuildingZones!.value = v);
+zoningFolder.add(state, 'showBuildingZones').name('Show Building Zones').onChange((v: boolean) => material.uniforms.uShowBuildingZones!.value = v ? 1 : 0);
+zoningFolder.add(state, 'buildingDensity', 0.0, 1.0).name('Building Density').onChange((v: number) => {
+    material.uniforms.uBuildingDensity!.value = v;
+    updateRoads();
+});
 zoningFolder.addColor(state, 'zoneCentralColor').name('Central Color').onChange((v: number) => material.uniforms.zoneCentralColor!.value.set(v));
 zoningFolder.addColor(state, 'zoneCommercialColor').name('Commercial Color').onChange((v: number) => material.uniforms.zoneCommercialColor!.value.set(v));
 zoningFolder.addColor(state, 'zoneResidentialColor').name('Residential Color').onChange((v: number) => material.uniforms.zoneResidentialColor!.value.set(v));
+zoningFolder.addColor(state, 'zoneBuildingColor').name('Building Color').onChange((v: number) => material.uniforms.zoneBuildingColor!.value.set(v));
 zoningFolder.open();
 
 environmentFolder.add(state, 'timeOfDay', 0, 24).name('Time (0-24)').onChange(() => updateTimeOfDay());
 environmentFolder.add(state, 'showStats').name('Show Stats').onChange((v: boolean) => stats.dom.style.display = v ? 'block' : 'none');
-environmentFolder.add(state, 'debugMode', { 'Off': 0, 'SDF': 1, 'Grid': 2, 'No Optimization': 3, 'BakeMap': 4 }).name('Debug Mode').onChange((v: number) => material.uniforms.uDebugMode!.value = v);
+environmentFolder.add(state, 'debugMode', { 'Off': 0, 'SDF': 1, 'Grid': 2, 'No Optimization': 3, 'BakeMap': 4, 'Buildings': 5 }).name('Debug Mode').onChange((v: number) => material.uniforms.uDebugMode!.value = v);
 environmentFolder.open();
 
 // --- Init ---
-let firstFrame = true;
+let frameCount = 0;
 
 function animate() {
-    if (firstFrame) {
+    frameCount++;
+    // Wait until frame 2 to ensure everything is initialized
+    if (frameCount === 2) {
         updateRoads();
         updateTimeOfDay();
-        firstFrame = false;
     }
     stats.begin();
     requestAnimationFrame(animate);

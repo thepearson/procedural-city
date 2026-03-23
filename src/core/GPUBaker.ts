@@ -3,7 +3,7 @@ import bakeVertexShader from '../shaders/bake.vert.glsl';
 import bakeFragmentShader from '../shaders/bake.frag.glsl';
 import { TERRAIN_SIZE } from './RoadGenerator.js';
 
-export const BAKE_SIZE = 1024;
+export const BAKE_SIZE = 2048;
 
 export class GPUBaker {
     renderTarget: THREE.WebGLRenderTarget;
@@ -25,12 +25,14 @@ export class GPUBaker {
         this.material = new THREE.ShaderMaterial({
             uniforms: {
                 numSegments: { value: 0 },
+                numBuildings: { value: 0 },
                 uRoadData: { value: null },
                 roadWidth: { value: initialState.roadWidth },
                 footpathWidth: { value: initialState.footpathWidth },
                 lampInterval: { value: initialState.lampInterval },
                 lampRadius: { value: initialState.lampRadius },
-                uTerrainSize: { value: TERRAIN_SIZE }
+                uTerrainSize: { value: TERRAIN_SIZE },
+                uBuildingDensity: { value: initialState.buildingDensity }
             },
             vertexShader: bakeVertexShader,
             fragmentShader: bakeFragmentShader
@@ -39,7 +41,7 @@ export class GPUBaker {
         this.scene.add(this.quad);
     }
 
-    bake(renderer: THREE.WebGLRenderer, numSegments: number, roadTexture: THREE.Texture, inputState: any) {
+    bake(renderer: THREE.WebGLRenderer, numSegments: number, numBuildings: number, roadTexture: THREE.Texture, inputState: any) {
         if (!inputState) {
             console.error('GPUBaker.bake called with undefined state');
             return;
@@ -47,12 +49,14 @@ export class GPUBaker {
         
         const u = this.material.uniforms;
         if (u['numSegments']) u['numSegments'].value = numSegments;
+        if (u['numBuildings']) u['numBuildings'].value = numBuildings;
         if (u['uRoadData']) u['uRoadData'].value = roadTexture;
         
         if (u['roadWidth']) u['roadWidth'].value = inputState.roadWidth;
         if (u['footpathWidth']) u['footpathWidth'].value = inputState.footpathWidth;
         if (u['lampInterval']) u['lampInterval'].value = inputState.lampInterval;
         if (u['lampRadius']) u['lampRadius'].value = inputState.lampRadius;
+        if (u['uBuildingDensity']) u['uBuildingDensity'].value = inputState.buildingDensity;
 
         const oldTarget = renderer.getRenderTarget();
         renderer.setRenderTarget(this.renderTarget);

@@ -17,6 +17,7 @@ export const state = {
     zoneCentralColor: 0x444444,
     zoneCommercialColor: 0x555566,
     zoneResidentialColor: 0x776655,
+    zoneBuildingColor: 0xffff00,
     roadColor: 0x333333,
     footpathColor: 0x999999,
     centerLineColor: 0xffff00,
@@ -29,6 +30,7 @@ export const state = {
     lampOffTime: 6.5,
     groundSegments: 64,
     showBuildingZones: true,
+    buildingDensity: 0.6,
     timeOfDay: 12.0, // 0-24
     showStats: false,
     debugMode: 0
