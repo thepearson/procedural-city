@@ -8,6 +8,8 @@ export interface BuildingData {
     rotation: number;
     seed: number;
     color: THREE.Color;
+    hasRoofFeature: boolean;
+    roofFeatureScale?: THREE.Vector3;
 }
 
 function hash12(x: number, y: number): number {
@@ -96,7 +98,7 @@ export class CityPlanner {
             const bRotation = -angle;
 
             const roadHalfWidth = roadWidth * (s.type === 'highway' ? 1.5 : 1.0) * 0.5;
-            const sidewalkEnd = roadHalfWidth + footpathWidth + 2.0;
+            const sidewalkEnd = roadHalfWidth + (s.type === 'street' ? footpathWidth : 0.0) + 0.1;
 
             const lotLength = 20.0;
             const numLots = Math.max(1, Math.floor(L / lotLength));
@@ -128,7 +130,7 @@ export class CityPlanner {
                             if (other === s) continue;
                             
                             const oHalfWidth = roadWidth * (other.type === 'highway' ? 1.5 : 1.0) * 0.5;
-                            const safetyDist = oHalfWidth + footpathWidth + 1.0;
+                            const safetyDist = oHalfWidth + (other.type === 'street' ? footpathWidth : 0.0) + 0.2;
                             if (distanceToSegmentSq(posX, posY, other.start.x, other.start.y, other.end.x, other.end.y) < (safetyDist + bRadius) ** 2) {
                                 roadCollide = true;
                                 break;
@@ -158,12 +160,25 @@ export class CityPlanner {
                         const lightness = 0.4 + (lotRand * 0.3);
                         const color = new THREE.Color().setHSL(hue, saturation, lightness);
 
+                        // Decide on roof feature (30% chance)
+                        const hasRoofFeature = (lotRand * 131.0 % 1.0) > 0.7;
+                        let roofFeatureScale;
+                        if (hasRoofFeature) {
+                            roofFeatureScale = new THREE.Vector3(
+                                finalWidth * (0.3 + (lotRand * 7.0 % 0.4)),
+                                2.0 + (lotRand * 11.0 % 3.0),
+                                bDepth * (0.3 + (lotRand * 5.0 % 0.4))
+                            );
+                        }
+
                         buildings.push({
                             pos: new THREE.Vector3(posX, 0, posY),
                             scale: new THREE.Vector3(finalWidth - 1.0, height, bDepth - 1.0),
                             rotation: bRotation,
                             seed: lotRand,
-                            color: color
+                            color: color,
+                            hasRoofFeature,
+                            roofFeatureScale
                         });
                     }
                 }
