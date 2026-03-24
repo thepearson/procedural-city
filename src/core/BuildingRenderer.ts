@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getTerrainHeight } from '../main.js';
+import { getTerrainHeight } from '../utils/terrain.js';
 import type { BuildingData } from './CityPlanner.js';
 
 import vertexShader from '../shaders/building.vert.glsl';

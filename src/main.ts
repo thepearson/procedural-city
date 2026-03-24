@@ -6,13 +6,12 @@ import Stats from 'stats.js';
 import vertexShader from './shaders/ground.vert.glsl';
 import fragmentShader from './shaders/ground.frag.glsl';
 
+import { getTerrainHeight } from './utils/terrain.js';
 import { RoadGenerator, TERRAIN_SIZE } from './core/RoadGenerator.js';
 import { GPUBaker } from './core/GPUBaker.js';
 import { RoadTexture } from './core/RoadTexture.js';
 import { BuildingRenderer } from './core/BuildingRenderer.js';
 import { CityPlanner } from './core/CityPlanner.js';
-import type { BuildingData } from './core/CityPlanner.js';
-import { snoise } from './utils/noise.js';
 import { state } from './state.js';
 
 // --- Performance Monitor ---
@@ -20,14 +19,6 @@ const stats = new Stats();
 stats.showPanel(0); 
 stats.dom.style.display = 'none';
 document.body.appendChild(stats.dom);
-
-export function getTerrainHeight(x: number, z: number): number {
-    const fNoiseMultiplier = 16.0;
-    const p = new THREE.Vector2(x, z);
-    const n1 = snoise(p.clone().multiplyScalar(state.noiseScale).add(new THREE.Vector2(state.noiseOffsetX, state.noiseOffsetZ)));
-    const n2 = snoise(new THREE.Vector2(n1, n1).multiplyScalar(state.noiseScale * fNoiseMultiplier).add(new THREE.Vector2(state.noiseOffsetX * fNoiseMultiplier, state.noiseOffsetZ * fNoiseMultiplier)));
-    return n2 * state.noiseHeight;
-}
 
 // --- Scene Setup ---
 const scene = new THREE.Scene();
