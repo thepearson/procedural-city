@@ -308,6 +308,14 @@ zoningFolder.addColor(state, 'zoneResidentialColor').name('Residential Color').o
 zoningFolder.addColor(state, 'zoneBuildingColor').name('Building Color').onChange((v: number) => material.uniforms.zoneBuildingColor!.value.set(v));
 zoningFolder.open();
 
+const buildingStyleFolder = gui.addFolder('Building Style');
+buildingStyleFolder.add(state, 'buildingWinWidth', 0.1, 1.0).name('Window Width').onChange((v: number) => buildingRenderer.material.uniforms.uWinWidth!.value = v);
+buildingStyleFolder.add(state, 'buildingWinHeight', 0.1, 1.0).name('Window Height').onChange((v: number) => buildingRenderer.material.uniforms.uWinHeight!.value = v);
+buildingStyleFolder.add(state, 'buildingSpacingX', 0.1, 5.0).name('Spacing X').onChange((v: number) => buildingRenderer.material.uniforms.uSpacingX!.value = v);
+buildingStyleFolder.add(state, 'buildingSpacingY', 0.1, 10.0).name('Spacing Y').onChange((v: number) => buildingRenderer.material.uniforms.uSpacingY!.value = v);
+buildingStyleFolder.add(state, 'buildingWinShininess', 0.0, 20.0).name('Shininess').onChange((v: number) => buildingRenderer.material.uniforms.uWinShininess!.value = v);
+buildingStyleFolder.open();
+
 environmentFolder.add(state, 'timeOfDay', 0, 24).name('Time (0-24)').onChange(() => updateTimeOfDay());
 environmentFolder.add(state, 'showStats').name('Show Stats').onChange((v: boolean) => stats.dom.style.display = v ? 'block' : 'none');
 environmentFolder.add(state, 'debugMode', { 'Off': 0, 'SDF': 1, 'Grid': 2, 'No Optimization': 3, 'BakeMap': 4, 'Buildings': 5 }).name('Debug Mode').onChange((v: number) => material.uniforms.uDebugMode!.value = v);

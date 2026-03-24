@@ -23,7 +23,7 @@ export const state = {
     centerLineColor: 0xffff00,
     laneLineColor: 0xffffff,
     lampInterval: 12.0,
-    lampIntensity: 2.0,
+    lampIntensity: 0.75,
     lampRadius: 15.0,
     lampColor: 0xffaa44,
     lampOnTime: 18.5,
@@ -31,6 +31,12 @@ export const state = {
     groundSegments: 64,
     showBuildingZones: true,
     buildingDensity: 0.6,
+    // Building Style Defaults
+    buildingWinWidth: 0.75,
+    buildingWinHeight: 1.0,
+    buildingSpacingX: 1.2,
+    buildingSpacingY: 2.8,
+    buildingWinShininess: 4.0,
     timeOfDay: 12.0, // 0-24
     showStats: false,
     debugMode: 0

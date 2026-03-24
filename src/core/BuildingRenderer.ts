@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getTerrainHeight } from '../utils/terrain.js';
+import { state } from '../state.js';
 import type { BuildingData, BuildingShape } from './CityPlanner.js';
 
 import vertexShader from '../shaders/building.vert.glsl';
@@ -18,7 +19,12 @@ export class BuildingRenderer {
                 uSunColor: { value: new THREE.Color(0xffffff) },
                 uSunIntensity: { value: 1.0 },
                 uAmbientColor: { value: new THREE.Color(0x111111) },
-                uLampIntensity: { value: 0.0 }
+                uLampIntensity: { value: 0.0 },
+                uWinWidth: { value: state.buildingWinWidth },
+                uWinHeight: { value: state.buildingWinHeight },
+                uSpacingX: { value: state.buildingSpacingX },
+                uSpacingY: { value: state.buildingSpacingY },
+                uWinShininess: { value: state.buildingWinShininess }
             },
             vertexShader,
             fragmentShader
@@ -42,6 +48,9 @@ export class BuildingRenderer {
             const seeds = new Float32Array(maxBuildings);
             mesh.geometry.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds, 1));
 
+            const tapers = new Float32Array(maxBuildings);
+            mesh.geometry.setAttribute('aTaper', new THREE.InstancedBufferAttribute(tapers, 1));
+
             this.meshes.set(shape, mesh);
             scene.add(mesh);
         });
@@ -50,7 +59,7 @@ export class BuildingRenderer {
         const roofGeo = new THREE.BoxGeometry(1, 1, 1);
         roofGeo.translate(0, 0.5, 0);
         const roofMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
-        this.roofMesh = new THREE.InstancedMesh(roofGeo, roofMaterial, maxBuildings);
+        this.roofMesh = new THREE.InstancedMesh(roofGeo, roofMaterial, maxBuildings * 8); // Increased capacity
         this.roofMesh.castShadow = true;
         this.roofMesh.receiveShadow = true;
         this.roofMesh.count = 0;
@@ -139,12 +148,23 @@ export class BuildingRenderer {
             const seedAttr = mesh.geometry.getAttribute('aSeed') as THREE.InstancedBufferAttribute;
             seedAttr.setX(count, b.seed);
 
+            const taperAttr = mesh.geometry.getAttribute('aTaper') as THREE.InstancedBufferAttribute;
+            taperAttr.setX(count, b.taperAmount);
+
             shapeCounts.set(b.shape, count + 1);
 
-            // Handle roof feature
-            if (b.hasRoofFeature && b.roofFeatureScale && roofFeatureCount < this.roofMesh.instanceMatrix.count) {
-                this.dummy.position.set(b.pos.x, h + b.scale.y, b.pos.z);
-                this.dummy.scale.copy(b.roofFeatureScale);
+            // Handle roof features
+            for (const f of b.roofFeatures) {
+                if (roofFeatureCount >= this.roofMesh.instanceMatrix.count) break;
+                
+                // Position relative to building top center
+                // 1. Start from building world pos
+                // 2. Add height offset
+                // 3. Add relative offset rotated by building rotation
+                const localOffset = new THREE.Vector3(f.pos.x, 0, f.pos.z).applyAxisAngle(new THREE.Vector3(0, 1, 0), b.rotation);
+                this.dummy.position.set(b.pos.x + localOffset.x, h + b.scale.y, b.pos.z + localOffset.z);
+                this.dummy.rotation.set(0, b.rotation, 0);
+                this.dummy.scale.copy(f.scale);
                 this.dummy.updateMatrix();
                 this.roofMesh.setMatrixAt(roofFeatureCount++, this.dummy.matrix);
             }
@@ -157,6 +177,7 @@ export class BuildingRenderer {
             mesh.instanceMatrix.needsUpdate = true;
             if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
             (mesh.geometry.getAttribute('aSeed') as THREE.InstancedBufferAttribute).needsUpdate = true;
+            (mesh.geometry.getAttribute('aTaper') as THREE.InstancedBufferAttribute).needsUpdate = true;
         });
 
         this.roofMesh.count = roofFeatureCount;

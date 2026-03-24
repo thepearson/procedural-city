@@ -4,15 +4,20 @@ import type { Segment } from './RoadGenerator.js';
 
 export type BuildingShape = 'square' | 'rectangular' | 'circular' | 'hexagonal' | 'L' | 'U';
 
+export interface RoofFeature {
+    pos: THREE.Vector3; // Relative to building top center
+    scale: THREE.Vector3;
+}
+
 export interface BuildingData {
     pos: THREE.Vector3;
     scale: THREE.Vector3;
     rotation: number;
     seed: number;
+    taperAmount: number;
     color: THREE.Color;
     shape: BuildingShape;
-    hasRoofFeature: boolean;
-    roofFeatureScale: THREE.Vector3 | undefined;
+    roofFeatures: RoofFeature[];
 }
 
 function hash12(x: number, y: number): number {
@@ -157,32 +162,57 @@ export class CityPlanner {
                         const heightMult = 1.0 / (1.0 + distToCenter * 0.015);
                         const height = 8.0 + (lotRand * 6.0) + (heightMult * 50.0);
 
+                        // Taper logic (match shader logic)
+                        const taperRand = hash12(lotRand, 7.0);
+                        const taperAmount = (taperRand > 0.6) ? (taperRand - 0.6) * 1.5 : 0.0;
+                        const topScale = 1.0 - taperAmount;
+
                         // Random building color
                         const hue = (lotRand * 0.1) + 0.05; // Browns/Greys/Beiges
                         const saturation = lotRand * 0.2;
                         const lightness = 0.4 + (lotRand * 0.3);
                         const color = new THREE.Color().setHSL(hue, saturation, lightness);
 
-                        // Decide on roof feature (30% chance)
-                        const hasRoofFeature = (lotRand * 131.0 % 1.0) > 0.7;
-                        let roofFeatureScale;
-                        if (hasRoofFeature) {
-                            roofFeatureScale = new THREE.Vector3(
-                                finalWidth * (0.3 + (lotRand * 7.0 % 0.4)),
-                                2.0 + (lotRand * 11.0 % 3.0),
-                                bDepth * (0.3 + (lotRand * 5.0 % 0.4))
-                            );
+                        // Decide on roof features (60% chance)
+                        const roofFeatures: RoofFeature[] = [];
+                        if ((lotRand * 131.0 % 1.0) > 0.4) {
+                            const numFeatures = 1 + Math.floor(lotRand * 4.0);
+                            for (let f = 0; f < numFeatures; f++) {
+                                const fRand = hash12(lotRand, f * 17.1);
+                                // Much smaller features
+                                const fWidth = (0.05 + fRand * 0.1) * finalWidth;
+                                const fDepth = (0.05 + fRand * 0.1) * bDepth;
+                                
+                                // Random offset within the building top (centered at 0,0)
+                                // Scaled by topScale to ensure it stays on the tapered top
+                                const offsetX = (fRand * 2.0 - 1.0) * (finalWidth * 0.5 * topScale - fWidth * 0.5);
+                                const offsetZ = (hash12(fRand, 3.1) * 2.0 - 1.0) * (bDepth * 0.5 * topScale - fDepth * 0.5);
+
+                                roofFeatures.push({
+                                    pos: new THREE.Vector3(offsetX, 0, offsetZ),
+                                    scale: new THREE.Vector3(fWidth, 0.5 + fRand * 2.0, fDepth)
+                                });
+                            }
                         }
+
+                        // Decide on shape based on lot type/location or just randomness
+                        let shape: BuildingShape = 'square';
+                        const shapeRand = hash12(lotRand, 43.1);
+                        if (shapeRand > 0.85) shape = 'circular';
+                        else if (shapeRand > 0.75) shape = 'hexagonal';
+                        else if (shapeRand > 0.65) shape = 'L';
+                        else if (shapeRand > 0.55) shape = 'U';
+                        else if (finalWidth / bDepth > 1.2 || bDepth / finalWidth > 1.2) shape = 'rectangular';
 
                         buildings.push({
                             pos: new THREE.Vector3(posX, 0, posY),
                             scale: new THREE.Vector3(finalWidth - 1.0, height, bDepth - 1.0),
                             rotation: bRotation,
                             seed: lotRand,
+                            taperAmount,
                             color: color,
-                            shape: finalWidth / bDepth > 1.2 || bDepth / finalWidth > 1.2 ? 'rectangular' : 'square',
-                            hasRoofFeature,
-                            roofFeatureScale
+                            shape,
+                            roofFeatures
                         });
                     }
                 }

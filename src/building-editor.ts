@@ -3,7 +3,13 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import * as dat from 'dat.gui';
 import { BuildingRenderer } from './core/BuildingRenderer.js';
 import { state } from './state.js';
-import type { BuildingShape } from './core/CityPlanner.js';
+import type { BuildingShape, RoofFeature } from './core/CityPlanner.js';
+
+// Simple hash for building editor features
+function pseudoHash(x: number): number {
+    const val = Math.sin(x) * 43758.5453123;
+    return val - Math.floor(val);
+}
 
 // --- Building Editor State ---
 const buildingState = {
@@ -12,15 +18,26 @@ const buildingState = {
     height: 30.0,
     depth: 12.0,
     rotation: 0.0,
+    taperAmount: 0.0,
     color: 0x888888,
     seed: Math.random(),
-    hasRoofFeature: true,
-    roofFeatureWidth: 5.0,
-    roofFeatureHeight: 4.0,
-    roofFeatureDepth: 5.0,
+    winWidth: state.buildingWinWidth,
+    winHeight: state.buildingWinHeight,
+    spacingX: state.buildingSpacingX,
+    spacingY: state.buildingSpacingY,
+    winShininess: state.buildingWinShininess,
+    numRoofFeatures: 3,
+    roofFeatureMinSize: 0.5,
+    roofFeatureMaxSize: 1.5,
+    roofFeatureMinHeight: 0.5,
+    roofFeatureMaxHeight: 2.0,
     sunIntensity: 1.0,
     sunColor: 0xffffff,
     ambientColor: 0x222222,
+    lampIntensity: 0.75,
+    lampOnTime: 18.5,
+    lampOffTime: 6.5,
+    previewLights: false,
     timeOfDay: 12.0,
     autoRotate: false
 };
@@ -59,18 +76,48 @@ scene.add(ground);
 const buildingRenderer = new BuildingRenderer(scene, 1);
 
 function updateBuilding() {
+    const topScale = 1.0 - buildingState.taperAmount;
+    
+    // Generate roof features based on state and seed
+    const roofFeatures: RoofFeature[] = [];
+    for (let i = 0; i < buildingState.numRoofFeatures; i++) {
+        const fRand = pseudoHash(buildingState.seed + i * 17.1);
+        const fSizeRand = pseudoHash(fRand * 31.4);
+        
+        // Much smaller defaults
+        const fWidth = buildingState.roofFeatureMinSize + fSizeRand * (buildingState.roofFeatureMaxSize - buildingState.roofFeatureMinSize);
+        const fDepth = buildingState.roofFeatureMinSize + pseudoHash(fSizeRand * 7.1) * (buildingState.roofFeatureMaxSize - buildingState.roofFeatureMinSize);
+        const fHeight = buildingState.roofFeatureMinHeight + pseudoHash(fSizeRand * 13.1) * (buildingState.roofFeatureMaxHeight - buildingState.roofFeatureMinHeight);
+
+        // Offset within building bounds, scaled by topScale
+        const offsetX = (fRand * 2.0 - 1.0) * (buildingState.width * 0.5 * topScale - fWidth * 0.5);
+        const offsetZ = (pseudoHash(fRand * 5.1) * 2.0 - 1.0) * (buildingState.depth * 0.5 * topScale - fDepth * 0.5);
+
+        roofFeatures.push({
+            pos: new THREE.Vector3(offsetX, 0, offsetZ),
+            scale: new THREE.Vector3(fWidth, fHeight, fDepth)
+        });
+    }
+
     const buildingData = {
         pos: new THREE.Vector3(0, 0, 0),
         scale: new THREE.Vector3(buildingState.width, buildingState.height, buildingState.depth),
         rotation: buildingState.rotation,
         seed: buildingState.seed,
+        taperAmount: buildingState.taperAmount,
         color: new THREE.Color(buildingState.color),
         shape: buildingState.shape,
-        hasRoofFeature: buildingState.hasRoofFeature,
-        roofFeatureScale: buildingState.hasRoofFeature ? new THREE.Vector3(buildingState.roofFeatureWidth, buildingState.roofFeatureHeight, buildingState.roofFeatureDepth) : undefined
+        roofFeatures: roofFeatures
     };
 
     buildingRenderer.render([buildingData]);
+
+    // Update Window Uniforms
+    buildingRenderer.material.uniforms.uWinWidth!.value = buildingState.winWidth;
+    buildingRenderer.material.uniforms.uWinHeight!.value = buildingState.winHeight;
+    buildingRenderer.material.uniforms.uSpacingX!.value = buildingState.spacingX;
+    buildingRenderer.material.uniforms.uSpacingY!.value = buildingState.spacingY;
+    buildingRenderer.material.uniforms.uWinShininess!.value = buildingState.winShininess;
 }
 
 function updateEnvironment() {
@@ -88,11 +135,31 @@ function updateEnvironment() {
     else sky.set(0x050510);
     scene.background = sky;
 
+    // Calculate Lamp Power based on time
+    let lampPower = 0;
+    const isNight = buildingState.lampOnTime > buildingState.lampOffTime 
+        ? (t >= buildingState.lampOnTime || t <= buildingState.lampOffTime) 
+        : (t >= buildingState.lampOnTime && t <= buildingState.lampOffTime);
+    
+    if (isNight || buildingState.previewLights) {
+        lampPower = buildingState.lampIntensity;
+        if (!buildingState.previewLights) {
+            const fade = 0.5;
+            // Simple fade logic for editor
+            if (t >= buildingState.lampOnTime && t < buildingState.lampOnTime + fade) {
+                lampPower *= THREE.MathUtils.smoothstep(t, buildingState.lampOnTime, buildingState.lampOnTime + fade);
+            } else if (t > buildingState.lampOffTime - fade && t <= buildingState.lampOffTime) {
+                lampPower *= (1.0 - THREE.MathUtils.smoothstep(t, buildingState.lampOffTime - fade, buildingState.lampOffTime));
+            }
+        }
+    }
+
     // Update Building Material Uniforms
     buildingRenderer.material.uniforms.uSunDirection!.value.copy(sunLight.position).normalize();
     buildingRenderer.material.uniforms.uSunColor!.value.set(buildingState.sunColor);
     buildingRenderer.material.uniforms.uSunIntensity!.value = sunInt * buildingState.sunIntensity;
     buildingRenderer.material.uniforms.uAmbientColor!.value.set(buildingState.ambientColor);
+    buildingRenderer.material.uniforms.uLampIntensity!.value = lampPower;
 }
 
 // --- GUI ---
@@ -104,16 +171,26 @@ bFolder.add(buildingState, 'width', 1, 50).onChange(updateBuilding);
 bFolder.add(buildingState, 'height', 1, 200).onChange(updateBuilding);
 bFolder.add(buildingState, 'depth', 1, 50).onChange(updateBuilding);
 bFolder.add(buildingState, 'rotation', 0, Math.PI * 2).onChange(updateBuilding);
+bFolder.add(buildingState, 'taperAmount', 0, 1.0).name('Taper Amount').onChange(updateBuilding);
 bFolder.addColor(buildingState, 'color').onChange(updateBuilding);
 bFolder.add(buildingState, 'seed', 0, 1).onChange(updateBuilding);
 bFolder.add({ randomizeSeed: () => { buildingState.seed = Math.random(); gui.updateDisplay(); updateBuilding(); } }, 'randomizeSeed');
 bFolder.open();
 
+const wFolder = gui.addFolder('Window Style');
+wFolder.add(buildingState, 'winWidth', 0.1, 1.0).name('Window Width').onChange(updateBuilding);
+wFolder.add(buildingState, 'winHeight', 0.1, 1.0).name('Window Height').onChange(updateBuilding);
+wFolder.add(buildingState, 'spacingX', 0.1, 5.0).name('Spacing X').onChange(updateBuilding);
+wFolder.add(buildingState, 'spacingY', 0.1, 10.0).name('Spacing Y').onChange(updateBuilding);
+wFolder.add(buildingState, 'winShininess', 0.0, 20.0).name('Shininess').onChange(updateBuilding);
+wFolder.open();
+
 const rFolder = gui.addFolder('Roof Features');
-rFolder.add(buildingState, 'hasRoofFeature').onChange(updateBuilding);
-rFolder.add(buildingState, 'roofFeatureWidth', 1, 40).onChange(updateBuilding);
-rFolder.add(buildingState, 'roofFeatureHeight', 1, 20).onChange(updateBuilding);
-rFolder.add(buildingState, 'roofFeatureDepth', 1, 40).onChange(updateBuilding);
+rFolder.add(buildingState, 'numRoofFeatures', 0, 10).step(1).name('Count').onChange(updateBuilding);
+rFolder.add(buildingState, 'roofFeatureMinSize', 0.1, 5.0).name('Min Size').onChange(updateBuilding);
+rFolder.add(buildingState, 'roofFeatureMaxSize', 0.1, 10.0).name('Max Size').onChange(updateBuilding);
+rFolder.add(buildingState, 'roofFeatureMinHeight', 0.1, 5.0).name('Min Height').onChange(updateBuilding);
+rFolder.add(buildingState, 'roofFeatureMaxHeight', 0.1, 10.0).name('Max Height').onChange(updateBuilding);
 rFolder.open();
 
 const eFolder = gui.addFolder('Environment');
@@ -121,6 +198,8 @@ eFolder.add(buildingState, 'timeOfDay', 0, 24).onChange(updateEnvironment);
 eFolder.add(buildingState, 'sunIntensity', 0, 5).onChange(updateEnvironment);
 eFolder.addColor(buildingState, 'sunColor').onChange(updateEnvironment);
 eFolder.addColor(buildingState, 'ambientColor').onChange(updateEnvironment);
+eFolder.add(buildingState, 'lampIntensity', 0, 10).onChange(updateEnvironment);
+eFolder.add(buildingState, 'previewLights').name('Preview Lights').onChange(updateEnvironment);
 eFolder.add(buildingState, 'autoRotate');
 eFolder.open();
 

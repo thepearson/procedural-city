@@ -2,19 +2,13 @@
 // for an InstancedMesh if it detects they are used in the code.
 
 attribute float aSeed;
+attribute float aTaper;
 
 varying vec2 vUv;
 varying vec3 vNormal;
 varying vec3 vWorldPosition;
 varying float vSeed;
 varying vec3 vInstanceColor;
-
-float hash11(float p) {
-    p = fract(p * .1031);
-    p *= (p + 33.33);
-    p *= (p + p);
-    return fract(p);
-}
 
 void main() {
     vSeed = aSeed;
@@ -23,11 +17,7 @@ void main() {
     // local position.y is 0 to 1 (because of geometry.translate(0, 0.5, 0))
     float localY = position.y;
     
-    // 40% chance of tapering
-    float taperRand = hash11(vSeed * 7.0);
-    float taperAmount = (taperRand > 0.6) ? (taperRand - 0.6) * 1.5 : 0.0; 
-    
-    float taperScale = 1.0 - (localY * taperAmount);
+    float taperScale = 1.0 - (localY * aTaper);
     vec3 taperedPos = position;
     taperedPos.x *= taperScale;
     taperedPos.z *= taperScale;
