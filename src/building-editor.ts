@@ -3,9 +3,11 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import * as dat from 'dat.gui';
 import { BuildingRenderer } from './core/BuildingRenderer.js';
 import { state } from './state.js';
+import type { BuildingShape } from './core/CityPlanner.js';
 
 // --- Building Editor State ---
 const buildingState = {
+    shape: 'square' as BuildingShape,
     width: 15.0,
     height: 30.0,
     depth: 12.0,
@@ -19,7 +21,8 @@ const buildingState = {
     sunIntensity: 1.0,
     sunColor: 0xffffff,
     ambientColor: 0x222222,
-    timeOfDay: 12.0
+    timeOfDay: 12.0,
+    autoRotate: false
 };
 
 // --- Scene Setup ---
@@ -62,6 +65,7 @@ function updateBuilding() {
         rotation: buildingState.rotation,
         seed: buildingState.seed,
         color: new THREE.Color(buildingState.color),
+        shape: buildingState.shape,
         hasRoofFeature: buildingState.hasRoofFeature,
         roofFeatureScale: buildingState.hasRoofFeature ? new THREE.Vector3(buildingState.roofFeatureWidth, buildingState.roofFeatureHeight, buildingState.roofFeatureDepth) : undefined
     };
@@ -85,22 +89,24 @@ function updateEnvironment() {
     scene.background = sky;
 
     // Update Building Material Uniforms
-    buildingRenderer.material.uniforms.uSunDirection.value.copy(sunLight.position).normalize();
-    buildingRenderer.material.uniforms.uSunColor.value.set(buildingState.sunColor);
-    buildingRenderer.material.uniforms.uSunIntensity.value = sunInt * buildingState.sunIntensity;
-    buildingRenderer.material.uniforms.uAmbientColor.value.set(buildingState.ambientColor);
+    buildingRenderer.material.uniforms.uSunDirection!.value.copy(sunLight.position).normalize();
+    buildingRenderer.material.uniforms.uSunColor!.value.set(buildingState.sunColor);
+    buildingRenderer.material.uniforms.uSunIntensity!.value = sunInt * buildingState.sunIntensity;
+    buildingRenderer.material.uniforms.uAmbientColor!.value.set(buildingState.ambientColor);
 }
 
 // --- GUI ---
 const gui = new dat.GUI();
 
 const bFolder = gui.addFolder('Building Dimensions');
+bFolder.add(buildingState, 'shape', ['square', 'rectangular', 'circular', 'hexagonal', 'L', 'U']).onChange(updateBuilding);
 bFolder.add(buildingState, 'width', 1, 50).onChange(updateBuilding);
 bFolder.add(buildingState, 'height', 1, 200).onChange(updateBuilding);
 bFolder.add(buildingState, 'depth', 1, 50).onChange(updateBuilding);
 bFolder.add(buildingState, 'rotation', 0, Math.PI * 2).onChange(updateBuilding);
 bFolder.addColor(buildingState, 'color').onChange(updateBuilding);
 bFolder.add(buildingState, 'seed', 0, 1).onChange(updateBuilding);
+bFolder.add({ randomizeSeed: () => { buildingState.seed = Math.random(); gui.updateDisplay(); updateBuilding(); } }, 'randomizeSeed');
 bFolder.open();
 
 const rFolder = gui.addFolder('Roof Features');
@@ -115,11 +121,16 @@ eFolder.add(buildingState, 'timeOfDay', 0, 24).onChange(updateEnvironment);
 eFolder.add(buildingState, 'sunIntensity', 0, 5).onChange(updateEnvironment);
 eFolder.addColor(buildingState, 'sunColor').onChange(updateEnvironment);
 eFolder.addColor(buildingState, 'ambientColor').onChange(updateEnvironment);
+eFolder.add(buildingState, 'autoRotate');
 eFolder.open();
 
 // --- Animation Loop ---
 function animate() {
     requestAnimationFrame(animate);
+    if (buildingState.autoRotate) {
+        buildingState.rotation += 0.01;
+        updateBuilding();
+    }
     controls.update();
     renderer.render(scene, camera);
 }

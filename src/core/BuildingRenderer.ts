@@ -1,20 +1,17 @@
 import * as THREE from 'three';
 import { getTerrainHeight } from '../utils/terrain.js';
-import type { BuildingData } from './CityPlanner.js';
+import type { BuildingData, BuildingShape } from './CityPlanner.js';
 
 import vertexShader from '../shaders/building.vert.glsl';
 import fragmentShader from '../shaders/building.frag.glsl';
 
 export class BuildingRenderer {
-    mesh: THREE.InstancedMesh;
+    meshes: Map<BuildingShape, THREE.InstancedMesh> = new Map();
     roofMesh: THREE.InstancedMesh;
     private dummy = new THREE.Object3D();
     material: THREE.ShaderMaterial;
 
     constructor(scene: THREE.Scene, maxBuildings: number = 8192) {
-        const geometry = new THREE.BoxGeometry(1, 1, 1);
-        geometry.translate(0, 0.5, 0);
-
         this.material = new THREE.ShaderMaterial({
             uniforms: {
                 uSunDirection: { value: new THREE.Vector3(0, 1, 0) },
@@ -27,50 +24,125 @@ export class BuildingRenderer {
             fragmentShader
         });
 
-        this.mesh = new THREE.InstancedMesh(geometry, this.material, maxBuildings);
-        this.mesh.castShadow = true;
-        this.mesh.receiveShadow = true;
-        this.mesh.frustumCulled = false;
+        // Initialize meshes for each shape
+        const shapes: BuildingShape[] = ['square', 'rectangular', 'circular', 'hexagonal', 'L', 'U'];
+        shapes.forEach(shape => {
+            const geometry = this.createGeometryForShape(shape);
+            geometry.translate(0, 0.5, 0); // Pivot at bottom
 
-        // Initialize instanceColor attribute explicitly to avoid shader compilation errors
-        const colors = new Float32Array(maxBuildings * 3);
-        this.mesh.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
+            const mesh = new THREE.InstancedMesh(geometry, this.material, maxBuildings);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.frustumCulled = false;
+            mesh.count = 0; // Start with 0 visible
 
-        // Add custom seed attribute
-        const seeds = new Float32Array(maxBuildings);
-        this.mesh.geometry.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds, 1));
+            const colors = new Float32Array(maxBuildings * 3);
+            mesh.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
 
-        // Create a simple material for roof features (could be a separate shader later)
+            const seeds = new Float32Array(maxBuildings);
+            mesh.geometry.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds, 1));
+
+            this.meshes.set(shape, mesh);
+            scene.add(mesh);
+        });
+
+        // Roof features still use a simple box for now
+        const roofGeo = new THREE.BoxGeometry(1, 1, 1);
+        roofGeo.translate(0, 0.5, 0);
         const roofMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
-        this.roofMesh = new THREE.InstancedMesh(geometry, roofMaterial, maxBuildings);
+        this.roofMesh = new THREE.InstancedMesh(roofGeo, roofMaterial, maxBuildings);
         this.roofMesh.castShadow = true;
         this.roofMesh.receiveShadow = true;
+        this.roofMesh.count = 0;
 
-        scene.add(this.mesh, this.roofMesh);
+        scene.add(this.roofMesh);
+    }
+
+    private createGeometryForShape(shape: BuildingShape): THREE.BufferGeometry {
+        switch (shape) {
+            case 'square':
+            case 'rectangular':
+                return new THREE.BoxGeometry(1, 1, 1);
+            case 'circular':
+                return new THREE.CylinderGeometry(0.5, 0.5, 1, 32);
+            case 'hexagonal':
+                return new THREE.CylinderGeometry(0.5, 0.5, 1, 6);
+            case 'L':
+                return this.createLShapeGeometry();
+            case 'U':
+                return this.createUShapeGeometry();
+            default:
+                return new THREE.BoxGeometry(1, 1, 1);
+        }
+    }
+
+    private createLShapeGeometry(): THREE.BufferGeometry {
+        const shape = new THREE.Shape();
+        shape.moveTo(-0.5, -0.5);
+        shape.lineTo(0.5, -0.5);
+        shape.lineTo(0.5, -0.1);
+        shape.lineTo(-0.1, -0.1);
+        shape.lineTo(-0.1, 0.5);
+        shape.lineTo(-0.5, 0.5);
+        shape.closePath();
+
+        const extrudeSettings = { depth: 1, bevelEnabled: false };
+        const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+        geometry.translate(0, 0, -0.5); // Center on Z before rotation
+        geometry.rotateX(Math.PI / 2); // Align with box geometry (Z becomes Y)
+        return geometry;
+    }
+
+    private createUShapeGeometry(): THREE.BufferGeometry {
+        const shape = new THREE.Shape();
+        shape.moveTo(-0.5, -0.5);
+        shape.lineTo(0.5, -0.5);
+        shape.lineTo(0.5, 0.5);
+        shape.lineTo(0.1, 0.5);
+        shape.lineTo(0.1, -0.1);
+        shape.lineTo(-0.1, -0.1);
+        shape.lineTo(-0.1, 0.5);
+        shape.lineTo(-0.5, 0.5);
+        shape.closePath();
+
+        const extrudeSettings = { depth: 1, bevelEnabled: false };
+        const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+        geometry.translate(0, 0, -0.5); // Center on Z before rotation
+        geometry.rotateX(Math.PI / 2); // Align with box geometry (Z becomes Y)
+        return geometry;
     }
 
     render(buildings: BuildingData[]) {
-        const capacity = this.mesh.instanceMatrix.count;
-        const count = Math.min(buildings.length, capacity);
-        const seedAttr = this.mesh.geometry.getAttribute('aSeed') as THREE.InstancedBufferAttribute;
+        // Clear counts
+        this.meshes.forEach(mesh => mesh.count = 0);
+        this.roofMesh.count = 0;
 
+        const shapeCounts: Map<BuildingShape, number> = new Map();
         let roofFeatureCount = 0;
 
-        for (let i = 0; i < count; i++) {
-            const b = buildings[i]!;
-            
+        for (const b of buildings) {
+            const mesh = this.meshes.get(b.shape);
+            if (!mesh) continue;
+
+            const count = shapeCounts.get(b.shape) || 0;
+            if (count >= mesh.instanceMatrix.count) continue;
+
             const h = getTerrainHeight(b.pos.x, b.pos.z);
             this.dummy.position.set(b.pos.x, h, b.pos.z);
             this.dummy.rotation.set(0, b.rotation, 0);
             this.dummy.scale.copy(b.scale);
             this.dummy.updateMatrix();
+
+            mesh.setMatrixAt(count, this.dummy.matrix);
+            mesh.setColorAt(count, b.color);
             
-            this.mesh.setMatrixAt(i, this.dummy.matrix);
-            this.mesh.setColorAt(i, b.color);
-            seedAttr.setX(i, b.seed);
+            const seedAttr = mesh.geometry.getAttribute('aSeed') as THREE.InstancedBufferAttribute;
+            seedAttr.setX(count, b.seed);
+
+            shapeCounts.set(b.shape, count + 1);
 
             // Handle roof feature
-            if (b.hasRoofFeature && b.roofFeatureScale) {
+            if (b.hasRoofFeature && b.roofFeatureScale && roofFeatureCount < this.roofMesh.instanceMatrix.count) {
                 this.dummy.position.set(b.pos.x, h + b.scale.y, b.pos.z);
                 this.dummy.scale.copy(b.roofFeatureScale);
                 this.dummy.updateMatrix();
@@ -78,10 +150,14 @@ export class BuildingRenderer {
             }
         }
 
-        this.mesh.count = count;
-        this.mesh.instanceMatrix.needsUpdate = true;
-        if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
-        seedAttr.needsUpdate = true;
+        // Update counts and buffers
+        this.meshes.forEach((mesh, shape) => {
+            const count = shapeCounts.get(shape) || 0;
+            mesh.count = count;
+            mesh.instanceMatrix.needsUpdate = true;
+            if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+            (mesh.geometry.getAttribute('aSeed') as THREE.InstancedBufferAttribute).needsUpdate = true;
+        });
 
         this.roofMesh.count = roofFeatureCount;
         this.roofMesh.instanceMatrix.needsUpdate = true;

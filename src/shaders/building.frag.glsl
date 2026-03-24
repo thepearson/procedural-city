@@ -39,8 +39,20 @@ void main() {
     if (abs(normal.y) > 0.9) {
         gridUV = worldPos.xz * 0.2; // Roof
     } else {
-        // More robust alignment per face
+        // Use vUv for more reliable horizontal mapping across various shapes
+        // We multiply vUv.x by a factor related to the building's perimeter, 
+        // but since we don't have that easily, we'll use a heuristic.
+        // For a box, vUv.x usually goes 0-1 around the perimeter or per face.
+        // In Three.js geometries, it's often per-face.
+        
         float horizontal = (abs(normal.z) > 0.5) ? worldPos.x : worldPos.z;
+        // If it's a cylinder, worldPos.x/z alone isn't enough for wrapping.
+        // Heuristic: if normal is not axis-aligned, use worldPos length-based mapping
+        if (abs(normal.x) > 0.1 && abs(normal.z) > 0.1) {
+             float angle = atan(normal.z, normal.x);
+             horizontal = angle * 5.0; // Scaled angle
+        }
+
         gridUV = vec2(horizontal / spacingX, worldPos.y / spacingY);
     }
     

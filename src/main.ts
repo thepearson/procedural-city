@@ -183,11 +183,11 @@ function updateTimeOfDay() {
     material.uniforms.lampIntensity!.value = lampPower;
 
     // Update Building Material
-    buildingRenderer.material.uniforms.uSunDirection.value.copy(sunLight.position).normalize();
-    buildingRenderer.material.uniforms.uSunColor.value.copy(material.uniforms.uSunColor.value);
-    buildingRenderer.material.uniforms.uSunIntensity.value = sunInt;
-    buildingRenderer.material.uniforms.uAmbientColor.value.copy(material.uniforms.uAmbientColor.value);
-    buildingRenderer.material.uniforms.uLampIntensity.value = lampPower;
+    buildingRenderer.material.uniforms.uSunDirection!.value.copy(sunLight.position).normalize();
+    buildingRenderer.material.uniforms.uSunColor!.value.copy(material.uniforms.uSunColor!.value);
+    buildingRenderer.material.uniforms.uSunIntensity!.value = sunInt;
+    buildingRenderer.material.uniforms.uAmbientColor!.value.copy(material.uniforms.uAmbientColor!.value);
+    buildingRenderer.material.uniforms.uLampIntensity!.value = lampPower;
 
     const lerp = isDay ? THREE.MathUtils.smoothstep(Math.sin(sunAngle), 0.0, 0.2) : 0;
     const d = 0.3;

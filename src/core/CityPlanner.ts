@@ -2,14 +2,17 @@ import * as THREE from 'three';
 import { state } from '../state.js';
 import type { Segment } from './RoadGenerator.js';
 
+export type BuildingShape = 'square' | 'rectangular' | 'circular' | 'hexagonal' | 'L' | 'U';
+
 export interface BuildingData {
     pos: THREE.Vector3;
     scale: THREE.Vector3;
     rotation: number;
     seed: number;
     color: THREE.Color;
+    shape: BuildingShape;
     hasRoofFeature: boolean;
-    roofFeatureScale?: THREE.Vector3;
+    roofFeatureScale: THREE.Vector3 | undefined;
 }
 
 function hash12(x: number, y: number): number {
@@ -177,6 +180,7 @@ export class CityPlanner {
                             rotation: bRotation,
                             seed: lotRand,
                             color: color,
+                            shape: finalWidth / bDepth > 1.2 || bDepth / finalWidth > 1.2 ? 'rectangular' : 'square',
                             hasRoofFeature,
                             roofFeatureScale
                         });
